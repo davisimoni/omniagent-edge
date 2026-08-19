@@ -134,6 +134,65 @@
   }
 }
 
+/*
+ * Stampa — è il percorso di esportazione in PDF.
+ *
+ * L'esportazione passa dal motore di stampa del browser anziché da una libreria:
+ * su Edge runtime non gira un generatore PDF lato server, e una resa lato client
+ * su canvas produrrebbe un'immagine, cioè un documento in cui il testo non si
+ * seleziona, non si cerca e non si copia. Un report di audit viene letto
+ * cercandoci dentro, quindi il testo deve restare testo.
+ *
+ * `visibility` e non `display` per isolare il report: nascondere gli antenati con
+ * `display: none` porterebbe via anche il contenuto, mentre `visibility` si
+ * riattiva selettivamente sul sottoalbero da stampare.
+ */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  [data-print-root],
+  [data-print-root] * {
+    visibility: visible;
+  }
+
+  [data-print-root] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+
+  /* Su carta il tema scuro sprecherebbe toner e ridurrebbe la leggibilità. */
+  :root,
+  .dark {
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-raised: #f6f6f7;
+    --foreground: #111114;
+    --muted: #55555f;
+    --border: #d6d6dc;
+    --border-strong: #b8b8c0;
+    --accent: #4b31c9;
+    --accent-soft: #eeeaff;
+    --accent-foreground: #ffffff;
+  }
+
+  /* Le sezioni non devono spezzarsi a metà fra due pagine. */
+  section,
+  li,
+  blockquote,
+  tr {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 16mm;
+  }
+}
+
 @keyframes omni-pulse {
   0%,
   100% {

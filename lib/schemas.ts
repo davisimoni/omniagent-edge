@@ -112,6 +112,18 @@ export const ACCEPTED_ATTACHMENT_TYPES = [
   'image/webp',
 ] as const;
 
+/**
+ * Dimensione reale di un payload base64, senza decodificarlo.
+ *
+ * Vive qui accanto al limite che fa rispettare, e non nella rotta: la usano sia
+ * `/api/extract` sia `/api/audit`, e una seconda copia sarebbe l'occasione per
+ * far divergere due controlli che devono restare identici.
+ */
+export function base64ByteLength(base64: string): number {
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
 export const attachmentSchema = z.object({
   name: z.string().min(1).max(255),
   mediaType: z.enum(ACCEPTED_ATTACHMENT_TYPES),

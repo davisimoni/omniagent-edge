@@ -12,6 +12,10 @@ import {
 import type { AgentToolName } from '@/lib/agent/tool-metadata';
 import { extractStructured, type ExtractInput, type ExtractOutcome } from '@/lib/ai/extract';
 import {
+  createComplianceTools,
+  type ComplianceToolDependencies,
+} from '@/lib/tools/compliance-tools';
+import {
   DEFAULT_TOP_K,
   MAX_TOP_K,
   searchVectorStore,
@@ -183,6 +187,7 @@ function toFailure(error: unknown, fallbackMessage: string): ToolFailure {
 export function createAgentTools(
   context: ToolContext = { tenantId: 'public' },
   overrides: Partial<ToolDependencies> = {},
+  complianceOverrides: Partial<ComplianceToolDependencies> = {},
 ) {
   const deps: ToolDependencies = { ...defaultToolDependencies, ...overrides };
 
@@ -277,7 +282,15 @@ export function createAgentTools(
     },
   });
 
-  return { searchVectorDB, extractStructuredData, fetchExternalAPI };
+  // I tool di audit sono costruiti qui e non altrove perché condividono il
+  // registro di run: `generateAuditReport` deve poter rileggere l'audit che
+  // `checkContractRisk` ha prodotto qualche step prima, nella stessa richiesta.
+  const complianceTools = createComplianceTools(
+    { tenantId: context.tenantId },
+    complianceOverrides,
+  );
+
+  return { searchVectorDB, extractStructuredData, fetchExternalAPI, ...complianceTools };
 }
 
 export type AgentToolSet = ReturnType<typeof createAgentTools>;

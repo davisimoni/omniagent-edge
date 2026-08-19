@@ -1,7 +1,7 @@
 import { extractStructured } from '@/lib/ai/extract';
 import { hasModelCredentials } from '@/lib/ai/model';
 import { estimateCostUsd } from '@/lib/metrics';
-import { extractRequestSchema, MAX_ATTACHMENT_BYTES } from '@/lib/schemas';
+import { base64ByteLength, extractRequestSchema, MAX_ATTACHMENT_BYTES } from '@/lib/schemas';
 
 /**
  * Estrazione strutturata sincrona.
@@ -19,12 +19,6 @@ function json(status: number, body: unknown): Response {
     status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
-}
-
-/** Dimensione reale di un payload base64, senza decodificarlo. */
-export function base64ByteLength(base64: string): number {
-  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
 export async function POST(request: Request): Promise<Response> {

@@ -1,8 +1,10 @@
 # OmniAgent Edge
 
-Piattaforma di agenti AI che gira interamente su **Vercel Edge**: un ciclo ReAct osservabile passo per passo, RAG ibrido su PostgreSQL + pgvector, ed estrazione di dati strutturati validati contro uno schema.
+Piattaforma di agenti AI su **Vercel Edge**, verticalizzata su un problema B2B concreto: l'**audit automatico di conformità dei fornitori** — rischi contrattuali, violazioni di SLA, clausole penali e lacune GDPR / ISO 27001, ciascuna con citazione del passaggio che la genera.
 
-Non è una demo che si limita a mostrare uno stream di testo. La dashboard rende **la struttura** dell'esecuzione — ragionamento, chiamata di strumento, osservazione, risposta — leggendola dai `parts` del messaggio, con latenza, token e costo stimato della run.
+Sotto c'è un'infrastruttura generale: ciclo ReAct osservabile passo per passo, RAG ibrido su PostgreSQL + pgvector, estrazione di dati strutturati validati contro schema. La dashboard rende **la struttura** dell'esecuzione — ragionamento, chiamata di strumento, osservazione, risposta — leggendola dai `parts` del messaggio, con latenza, token e costo stimato della run.
+
+**Ciò che distingue questo motore da un prompt ben scritto** è che il modello non produce mai un numero. Trova le prove e le cita; punteggio di rischio, clausole mancanti, gravità degli scostamenti e raccomandazioni escono da funzioni pure e testate. Un audit deve reggere davanti a un fornitore che lo contesta, e un "72/100" generato da un modello non regge: non si ricostruisce, non si spiega e cambia fra due esecuzioni sullo stesso PDF.
 
 ```
 Next.js 15 (App Router) · TypeScript strict · Tailwind CSS v4
@@ -15,16 +17,20 @@ Vercel AI SDK 7 · Claude Opus 5 · Zod 4 · Neon serverless (pgvector) · Vites
 
 | Modulo | File | In sintesi |
 |---|---|---|
-| **Agente ReAct** | [`app/api/chat/route.ts`](app/api/chat/route.ts) | Loop multi-step in streaming con tre strumenti tipizzati e tetto di step |
+| **Audit di conformità** | [`lib/audit/`](lib/audit/) · [`app/audit/page.tsx`](app/audit/page.tsx) | Contratto → rilievi citati, punteggio deterministico, report esecutivo |
+| **Agente ReAct** | [`app/api/chat/route.ts`](app/api/chat/route.ts) | Loop multi-step in streaming con sei strumenti tipizzati e tetto di step |
 | **Edge RAG** | [`lib/vector.ts`](lib/vector.ts) | Ricerca ibrida vettoriale + full-text, fusa con Reciprocal Rank Fusion |
 | **Estrattore** | [`app/extractor/page.tsx`](app/extractor/page.tsx) | Drag-and-drop → JSON validato, con citazione a supporto di ogni entità |
 | **Dashboard** | [`app/page.tsx`](app/page.tsx) | Timeline ReAct + telemetria di run, tema chiaro/scuro, mobile-first |
-| **Test** | [`tests/`](tests/) | 105 unit test su strumenti, fusione, connettori, metriche e schemi |
+| **Test** | [`tests/`](tests/) | 249 unit test su audit, strumenti, fusione, connettori, metriche e schemi |
 
-### I tre strumenti dell'agente
+### I sei strumenti dell'agente
 
 | Strumento | Cosa fa |
 |---|---|
+| `checkContractRisk` | Audit di contratto / SLA / DPA: rilievi GDPR e ISO 27001, penali, recesso, foro. Restituisce un `auditId` |
+| `verifySLABreach` | Prestazioni misurate contro impegni contrattuali, forniti o cercati nel vector store |
+| `generateAuditReport` | Report esecutivo con giudizio operativo, da un `auditId` già ottenuto |
 | `searchVectorDB` | Ricerca ibrida su pgvector: ramo semantico (HNSW, distanza coseno) + ramo lessicale (GIN, `ts_rank_cd`), fusi con RRF |
 | `extractStructuredData` | Testo libero → JSON conforme a schema Zod, con citazione letterale per ogni entità |
 | `fetchExternalAPI` | CRM, ERP e ticketing in sola lettura, da un **catalogo chiuso** di connettori e risorse |
@@ -46,6 +52,45 @@ npm test          # suite Vitest
 npm run typecheck # tsc --noEmit
 npm run build     # build di produzione
 ```
+
+---
+
+## Il motore di audit
+
+Apri `/audit`, premi **Carica contratto di esempio** ed esegui. Il contratto campione contiene problemi reali e riconoscibili — rinnovo tacito con disdetta a sei mesi, massimale pari a tre mensilità, foro estero, notifica delle violazioni senza termine, SLA con soglia ma senza penale — così i rilievi si possono controllare uno per uno sul testo.
+
+### Come funziona
+
+```
+contratto → [modello]  valuta le 20 clausole del catalogo, cita il testo, estrae gli SLA
+          → [codice]   verifica ogni citazione contro il sorgente
+          → [codice]   ricava le clausole mancanti per differenza dal catalogo
+          → [codice]   confronta gli SLA con le prestazioni misurate
+          → [codice]   calcola punteggio, fascia e raccomandazioni
+          → report esecutivo + JSON esportabile
+```
+
+Solo il primo passo è affidato al modello, ed è un compito di riconoscimento con evidenza citata. Tutto il resto è aritmetica in [`lib/audit/scoring.ts`](lib/audit/scoring.ts), [`lib/audit/sla.ts`](lib/audit/sla.ts) e [`lib/audit/citations.ts`](lib/audit/citations.ts) — funzioni pure, coperte da test, deterministiche a parità di ingresso.
+
+### Le cinque decisioni che contano
+
+**1. Le clausole mancanti si ricavano per differenza, non si chiedono.** I modelli riconoscono bene ciò che c'è e sono inaffidabili nell'enumerare ciò che manca: un'assenza non ha evidenza da citare, quindi nulla ancora la risposta al documento. Il [catalogo](lib/audit/clauses.ts) impone di valutare **una per una** venti clausole, con citazione quando sono presenti; le mancanti le calcoliamo noi. Una clausola che il modello non ha valutato **non** viene dichiarata assente: finisce nella copertura incompleta, perché un rilievo senza evidenza non è un rilievo.
+
+**2. Ogni citazione viene ricercata nel documento.** È il controllo più importante del motore. Il modo peggiore di sbagliare non è mancare un rilievo — quello lo trova la revisione umana — ma produrne uno con una citazione inventata, che viene portata a un tavolo di rinegoziazione dove il fornitore apre il contratto e la frase non c'è. Il confronto avviene su **finestre contigue di cinque parole**, non su un insieme di parole: una frase inesistente assemblata con termini presenti altrove supererebbe un confronto a sacchetto con punteggio pieno. L'esito entra nel report e compare accanto a ogni rilievo.
+
+**3. Un rilievo critico porta la fascia a "critico", qualunque sia il punteggio.** Un revisore non promuove un fornitore perché ha una sola non conformità maggiore su venti controlli. Un contratto privo di clausola di notifica delle violazioni è un problema critico anche se tutto il resto è impeccabile, e una media che lo diluisce sta descrivendo il contratto sbagliato. Il campo `bandRaisedByCriticalFinding` rende l'intervento visibile invece di nasconderlo nel numero.
+
+**4. La gravità di uno scostamento di disponibilità si misura sul budget di errore.** Un impegno del 99,9% disatteso con un 99,5% dà uno scostamento dello 0,4% *sulla soglia* — trascurabile, a leggerlo così. In realtà il contratto concedeva uno 0,1% di indisponibilità e ne sono stati consumati quattro volte tanto: circa tre ore di fermo al mese invece di quarantatré minuti. Su una percentuale con direzione "almeno" la gravità si calcola su `100 − soglia`; su tempi di risposta e conteggi resta il rapporto con la soglia.
+
+**5. "Nessuna violazione" e "nessun dato" non sono la stessa cosa.** Il report riporta sempre gli impegni per cui non sono state fornite misure e le metriche che non corrispondono ad alcun impegno. Un audit che dichiara zero violazioni quando non ha ricevuto dati su nove metriche su dieci comunica una falsità con parole vere.
+
+### Esportazione
+
+JSON (l'oggetto `ContractAudit` integrale, validato contro il proprio schema Zod), Markdown, e PDF tramite la stampa del browser. Il PDF passa dal motore di stampa e non da una libreria: su Edge runtime non gira un generatore PDF lato server, e una resa su canvas produrrebbe un'immagine — un documento in cui il testo non si seleziona, non si cerca e non si copia. Un report di audit viene letto cercandoci dentro.
+
+### Che cosa questo motore NON è
+
+Non è uno strumento di conformità e non certifica nulla. La valutazione di adeguatezza, la decisione di firmare e la responsabilità verso le autorità di controllo restano in capo al titolare. L'avvertenza accompagna ogni audit — in interfaccia, nel JSON esportato e nel PDF — perché un rilievo generato da un modello e presentato come verdetto sposta sull'utente una responsabilità che non ha modo di valutare. Uno strumento che accelera una revisione legale è utile; uno che sembra sostituirla è un danno.
 
 ---
 
@@ -124,18 +169,33 @@ Gli embedding del corpus sono memoizzati per identità dell'array, così il cost
 
 ```
 app/
+  api/audit/route.ts      Audit in streaming NDJSON, con avanzamento reale (Edge)
   api/chat/route.ts       Agente ReAct in streaming (Edge)
   api/extract/route.ts    Estrazione strutturata sincrona (Edge)
   api/health/route.ts     Diagnostica di configurazione
   page.tsx                Dashboard
+  audit/page.tsx          Banco di lavoro dell'audit
   extractor/page.tsx      Banco di lavoro dell'estrattore
 components/
+  audit-workbench.tsx     Caricamento, metriche osservate, esportazione
+  audit/audit-progress.tsx  Barra di avanzamento alimentata dal server
+  audit/risk-heatmap.tsx    Mappa di calore per area + indicatore complessivo
+  audit/audit-result.tsx    Rilievi citati, clausole, SLA, radice di stampa
   agent-console.tsx       useChat, composer, esempi
   trace-timeline.tsx      Thought / Tool Call / Observation / Final Output
   metrics-panel.tsx       Latenza, token, costo, step
   extractor-workbench.tsx Drag-and-drop, tabella entità, esportazione JSON
 lib/
-  agent/tools.ts          I tre strumenti, con dipendenze iniettabili
+  audit/schema.ts         Contratti Zod: cosa produce il modello, cosa calcoliamo noi
+  audit/clauses.ts        Catalogo delle 20 clausole attese
+  audit/scoring.ts        Punteggio, clausole mancanti, raccomandazioni (puro)
+  audit/citations.ts      Verifica delle citazioni contro il sorgente (puro)
+  audit/sla.ts            Confronto aritmetico degli impegni di servizio (puro)
+  audit/engine.ts         Orchestrazione modello + assemblaggio (assembleAudit è puro)
+  audit/report.ts         Report esecutivo in Markdown (puro)
+  audit/stream.ts         Protocollo NDJSON di avanzamento
+  tools/compliance-tools.ts  I tre strumenti di audit, con registro di run
+  agent/tools.ts          Strumenti generali, con dipendenze iniettabili
   agent/connectors.ts     Catalogo chiuso di connettori simulati
   agent/prompt.ts         Prompt di sistema
   ai/model.ts             Modello, listino, effort, credenziali
@@ -143,7 +203,7 @@ lib/
   vector.ts               Edge RAG: embedding, RRF, ricerca ibrida
   schemas.ts              Contratti Zod condivisi
   metrics.ts              Token, costo, latenza (puro)
-tests/                    105 unit test
+tests/                    249 unit test
 db/schema.sql             pgvector + full-text + indici
 scripts/ingest.ts         Popolamento del vector store
 ```

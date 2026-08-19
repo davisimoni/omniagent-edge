@@ -8,10 +8,13 @@ import {
   ChevronRight,
   Copy,
   Database,
+  FileCheck,
+  GaugeCircle,
   MessageSquare,
   Play,
   Plug,
   ScanText,
+  ShieldAlert,
   Terminal,
   User,
 } from 'lucide-react';
@@ -37,6 +40,9 @@ const TOOL_ICONS: Readonly<Record<AgentToolName, typeof Database>> = {
   searchVectorDB: Database,
   extractStructuredData: ScanText,
   fetchExternalAPI: Plug,
+  checkContractRisk: ShieldAlert,
+  verifySLABreach: GaugeCircle,
+  generateAuditReport: FileCheck,
 };
 
 function toolLabel(name: string): string {

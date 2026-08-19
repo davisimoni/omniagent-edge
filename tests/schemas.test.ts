@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { base64ByteLength } from '@/app/api/extract/route';
 import {
+  base64ByteLength,
   chatRequestSchema,
   extractRequestSchema,
   structuredExtractionSchema,
