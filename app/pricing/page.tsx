@@ -88,7 +88,7 @@ export default async function PricingPage() {
           />
           <Faq
             question="Posso disdire quando voglio?"
-            answer="Sì, dalle impostazioni, senza parlare con nessuno. Alla disdetta il workspace torna al piano Free: i dati restano, cambia solo quanti audit nuovi puoi fare."
+            answer="Sì, senza vincoli di durata e senza penali. Alla disdetta il workspace torna al piano Free: i dati restano dove sono, cambia solo quanti audit nuovi puoi fare. La disdetta in autonomia dalle impostazioni non è ancora attiva — per ora si richiede via email e viene applicata entro un giorno lavorativo."
           />
         </dl>
       </section>
