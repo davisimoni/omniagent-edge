@@ -4,18 +4,31 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
-const LINKS = [
+/**
+ * Navigazione principale.
+ *
+ * La cronologia compare solo a chi ha una sessione: mostrarla a chi non è
+ * autenticato produrrebbe un link che porta a una schermata di accesso, cioè
+ * una promessa che l'interfaccia non mantiene.
+ */
+const PUBLIC_LINKS = [
   { href: '/', label: 'Dashboard' },
   { href: '/audit', label: 'Audit' },
   { href: '/extractor', label: 'Estrattore' },
+  { href: '/pricing', label: 'Prezzi' },
 ] as const;
 
-export function NavLinks() {
+const PRIVATE_LINKS = [{ href: '/history', label: 'Cronologia' }] as const;
+
+export function NavLinks({ authenticated }: { authenticated: boolean }) {
   const pathname = usePathname();
+  const links = authenticated
+    ? [...PUBLIC_LINKS.slice(0, 3), ...PRIVATE_LINKS, ...PUBLIC_LINKS.slice(3)]
+    : PUBLIC_LINKS;
 
   return (
-    <nav aria-label="Sezioni principali" className="flex items-center gap-1">
-      {LINKS.map((link) => {
+    <nav aria-label="Sezioni principali" className="scrollbar-slim flex items-center gap-0.5 overflow-x-auto">
+      {links.map((link) => {
         const active = pathname === link.href;
         return (
           <Link
@@ -25,7 +38,7 @@ export function NavLinks() {
             // non comunica "sei qui" a chi non lo vede.
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors',
+              'shrink-0 rounded-md px-2 py-1.5 text-sm font-medium transition-colors',
               active
                 ? 'bg-surface-raised text-foreground'
                 : 'text-muted hover:bg-surface hover:text-foreground',

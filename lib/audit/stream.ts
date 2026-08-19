@@ -55,8 +55,20 @@ export interface AuditMetrics {
   readonly costUsd: number | null;
 }
 
+/** Esito della persistenza e delle notifiche, dopo un audit riuscito. */
+export interface AuditPersistence {
+  /** Id del record archiviato; `null` quando l'audit non è stato salvato. */
+  readonly recordId: string | null;
+  /** Perché non è stato salvato: senza spiegazione l'assenza sembra un guasto. */
+  readonly reason: string | null;
+  /** Audit ancora disponibili nel periodo; `null` se il piano non ha tetto. */
+  readonly remaining: number | null;
+  readonly notified: readonly { channel: string; delivered: boolean; reason: string | null }[];
+}
+
 export type AuditStreamEvent =
   | { readonly type: 'phase'; readonly phase: AuditPhase }
+  | { readonly type: 'persisted'; readonly persistence: AuditPersistence }
   | {
       readonly type: 'progress';
       /** Clausole del catalogo già valutate dal modello. */

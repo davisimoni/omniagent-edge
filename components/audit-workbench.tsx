@@ -2,6 +2,8 @@
 
 import {
   AlertCircle,
+  ArrowRight,
+  Check,
   FileDown,
   FileText,
   Loader2,
@@ -10,10 +12,12 @@ import {
   Printer,
   ScrollText,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useCallback, useId, useRef, useState, type DragEvent } from 'react';
 import { AuditOnboarding } from '@/components/audit/audit-onboarding';
 import { AuditProgress, type AuditProgressState } from '@/components/audit/audit-progress';
@@ -30,7 +34,12 @@ import {
   SAMPLE_OBSERVED_METRICS,
 } from '@/lib/audit/sample-contract';
 import { MAX_AUDIT_TEXT_LENGTH, type ContractAudit } from '@/lib/audit/schema';
-import { readNdjsonStream, type AuditMetrics, type AuditStreamEvent } from '@/lib/audit/stream';
+import {
+  readNdjsonStream,
+  type AuditMetrics,
+  type AuditPersistence,
+  type AuditStreamEvent,
+} from '@/lib/audit/stream';
 import { ACCEPTED_ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '@/lib/schemas';
 import { cn, copyToClipboard, downloadTextFile } from '@/lib/utils';
 
@@ -98,7 +107,9 @@ export function AuditWorkbench() {
   const [progress, setProgress] = useState<AuditProgressState | null>(null);
   const [audit, setAudit] = useState<ContractAudit | null>(null);
   const [metrics, setMetrics] = useState<AuditMetrics | null>(null);
+  const [persistence, setPersistence] = useState<AuditPersistence | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState<{ message: string; suggestedPlan: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const busy = progress !== null;
@@ -168,7 +179,9 @@ export function AuditWorkbench() {
     if (!canRun) return;
     setAudit(null);
     setMetrics(null);
+    setPersistence(null);
     setError(null);
+    setPaywall(null);
     setProgress({
       phase: 'queued',
       clausesAssessed: 0,
@@ -216,6 +229,16 @@ export function AuditWorkbench() {
       // come JSON con lo status giusto: vanno letti così, non come NDJSON.
       if (!response.ok || response.body === null) {
         const payload: unknown = await response.json().catch(() => null);
+        // Il 402 non è un errore dell'utente: è una decisione commerciale, e
+        // mostrarlo nel riquadro rosso degli errori la fa sembrare un guasto.
+        if (response.status === 402 && typeof payload === 'object' && payload !== null) {
+          const body = payload as { message?: unknown; suggestedPlan?: unknown };
+          setPaywall({
+            message: typeof body.message === 'string' ? body.message : 'Quota esaurita.',
+            suggestedPlan: typeof body.suggestedPlan === 'string' ? body.suggestedPlan : null,
+          });
+          return;
+        }
         const message =
           typeof payload === 'object' && payload !== null && 'message' in payload
             ? String((payload as { message: unknown }).message)
@@ -252,6 +275,8 @@ export function AuditWorkbench() {
         } else if (event.type === 'result') {
           setAudit(event.audit);
           setMetrics(event.metrics);
+        } else if (event.type === 'persisted') {
+          setPersistence(event.persistence);
         } else {
           setError(event.message);
         }
@@ -526,6 +551,81 @@ export function AuditWorkbench() {
 
       {/* ── Risultato ──────────────────────────────────────────────────────── */}
       <div className="space-y-4">
+        {/*
+          Il paywall è un invito, non un muro. Dice quanto è stato usato, quando
+          si azzera e che cosa cambierebbe: chi legge solo "quota esaurita" deve
+          cercare altrove le altre due informazioni, e la maggior parte non
+          cerca — chiude.
+        */}
+        {paywall !== null && (
+          <div
+            role="status"
+            className="rounded-xl border border-accent/40 bg-accent-soft/60 p-4 print:hidden"
+          >
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="size-4 text-accent" aria-hidden="true" />
+              Hai finito gli audit inclusi di questo mese
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted">{paywall.message}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-accent-foreground transition-opacity hover:opacity-90"
+              >
+                Vedi i piani
+                <ArrowRight className="size-3.5" aria-hidden="true" />
+              </Link>
+              <Link
+                href="/history"
+                className="text-xs font-medium text-accent underline-offset-2 hover:underline"
+              >
+                Rivedi gli audit già fatti
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Esito dell'archiviazione: dire dov'è finito il report vale quanto il report. */}
+        {persistence !== null && audit !== null && (
+          <div
+            className={cn(
+              'flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs print:hidden',
+              persistence.recordId !== null
+                ? 'border-success/30 bg-success/10 text-success'
+                : 'border-border bg-surface-raised text-muted',
+            )}
+          >
+            {persistence.recordId !== null ? (
+              <>
+                <Check className="size-3.5 shrink-0" aria-hidden="true" />
+                <span>Salvato nella cronologia del workspace.</span>
+                <Link
+                  href={`/history/${persistence.recordId}`}
+                  className="font-medium underline-offset-2 hover:underline"
+                >
+                  Aprilo
+                </Link>
+                {persistence.remaining !== null && (
+                  <span className="ml-auto tabular-nums">
+                    {persistence.remaining} audit rimasti questo mese
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                <span>{persistence.reason}</span>
+                <Link
+                  href="/register"
+                  className="font-medium text-accent underline-offset-2 hover:underline"
+                >
+                  Crea un account
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+
         {busy && progress !== null && (
           <div>
             <div className="mb-1.5 flex justify-end">

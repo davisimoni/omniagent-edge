@@ -26,7 +26,10 @@ Vercel AI SDK 7 · Claude Opus 5 · Zod 4 · Neon serverless (pgvector) · Vites
 | **Ingestion** | [`lib/ingestion/`](lib/ingestion/) | Rilevamento dei PDF scansionati e ripiego su lettura visiva |
 | **Assistente** | [`components/ui/support-widget.tsx`](components/ui/support-widget.tsx) | OmniSupport Edge: widget flottante, ancorato alle costanti reali |
 | **Developer Mode** | [`lib/showcase/specs.ts`](lib/showcase/specs.ts) | Badge che aprono la decisione architetturale e il codice che la realizza |
-| **Test** | [`tests/`](tests/) | 409 unit test su audit, sicurezza, ingestion, contrasti WCAG e schemi |
+| **Workspace** | [`app/history/`](app/history/) · [`lib/audits/`](lib/audits/) | Account, cronologia degli audit, confronto fra versioni, revisione umana |
+| **Monetizzazione** | [`lib/billing/`](lib/billing/) · [`app/pricing/`](app/pricing/) | Piani, quote per periodo, Stripe Checkout e webhook firmato |
+| **Diagnostica** | [`app/api/health/deep/`](app/api/health/deep/) | Latenze reali verso PostgreSQL, Redis e API del modello |
+| **Test** | [`tests/`](tests/) | 508 unit e integration test, contrasti WCAG inclusi |
 
 ### I sei strumenti dell'agente
 
@@ -95,6 +98,46 @@ JSON (l'oggetto `ContractAudit` integrale, validato contro il proprio schema Zod
 ### Che cosa questo motore NON è
 
 Non è uno strumento di conformità e non certifica nulla. La valutazione di adeguatezza, la decisione di firmare e la responsabilità verso le autorità di controllo restano in capo al titolare. L'avvertenza accompagna ogni audit — in interfaccia, nel JSON esportato e nel PDF — perché un rilievo generato da un modello e presentato come verdetto sposta sull'utente una responsabilità che non ha modo di valutare. Uno strumento che accelera una revisione legale è utile; uno che sembra sostituirla è un danno.
+
+---
+
+## Workspace, quote e team
+
+Senza `DATABASE_URL` e `SESSION_SECRET` l'applicazione resta **pienamente utilizzabile in modo anonimo**: l'audit funziona per intero, il report si esporta, semplicemente non viene archiviato — e ogni schermata lo dichiara invece di mostrare moduli inerti. Con entrambe configurate si aprono account, cronologia, quote e avvisi al team.
+
+### Account — [`lib/auth/`](lib/auth/)
+
+**PBKDF2-HMAC-SHA256 a 600.000 iterazioni, non bcrypt né Argon2id.** Argon2id resta la raccomandazione OWASP e bcrypt l'alternativa consolidata, ma nessuno dei due gira su Edge senza trascinarsi un modulo WASM — e tutta l'applicazione sta su Edge per latenza e residenza dei dati. PBKDF2 è nella Web Crypto API: nativo, senza dipendenze. Il formato dell'hash è versionato (`pbkdf2$iterazioni$sale$hash`) proprio perché quel numero salirà, e `needsRehash()` aggiorna le password esistenti al login successivo senza chiedere nulla.
+
+**Sessioni come cookie firmato, senza tabella.** Una tabella di sessioni impone una query al database su *ogni* richiesta autenticata: su Edge diventa la voce dominante della latenza. Il prezzo è che un token non si revoca singolarmente; si compensa con una durata di sette giorni e `session_version`, un contatore sull'utente che il cambio password incrementa — da quel momento ogni token emesso prima smette di valere.
+
+### Quote e pagamenti — [`lib/billing/`](lib/billing/)
+
+Free 3 audit/mese, Pro $99 con 100, Enterprise senza tetto. Il listino sta in [un solo file](lib/billing/plans.ts): pagina prezzi, controllo di quota e messaggio di blocco leggono da lì, così la pagina non può promettere cinque audit mentre il paywall ne concede tre.
+
+- **`evaluateQuota` è pura** — piano, consumo e istante in ingresso, verdetto in uscita — perché un blocco va spiegato a chi lo contesta.
+- **Il controllo è fail-closed**: se il database non risponde, la richiesta non passa. Il verso opposto trasformerebbe un guasto in audit illimitati per chiunque se ne accorga.
+- **Il credito si scala dopo, non prima.** Addebitare un audit fallito a metà è l'errore che l'utente nota e non perdona; un audit riuscito e non contato costa a noi, ed è il verso giusto in cui sbagliare.
+- **Il paywall dice tre cose**: quanto hai usato, quando si azzera, che cosa cambierebbe. Chi legge solo "quota esaurita" chiude la pagina.
+- Stripe è parlato **via REST**, come Upstash: due chiamate e una HMAC non giustificano centinaia di kilobyte in un bundle Edge. Il webhook è **fail-closed sul segreto** — senza `STRIPE_WEBHOOK_SECRET` risponde 503 a chiunque, perché un endpoint che applica cambi di piano senza verificare la firma regala abbonamenti a chi ne scopre l'URL. La firma si calcola sul **corpo grezzo**: `request.text()` e mai `request.json()`.
+
+### Cronologia e revisione — [`app/history/`](app/history/)
+
+Il valore del primo audit è il report; il valore del ventesimo è poterli confrontare. Le versioni successive dello stesso contratto si raggruppano per `contract_key` — il nome del documento normalizzato togliendo numeri di versione, date e suffissi come "def" o "firmato".
+
+**Un punteggio che scende è un miglioramento**, perché misura il rischio: invertirlo produrrebbe una freccia verde su un contratto peggiorato, ed è il modo più efficace di far firmare la revisione sbagliata. C'è un test dedicato solo a questo verso.
+
+Le colonne riassuntive sono duplicate fuori dal JSONB, deliberatamente: l'elenco filtra per fascia e ordina per punteggio, e leggere quei valori da JSONB a ogni scansione impedirebbe l'uso di un indice.
+
+### Avvisi al team — [`lib/notifications/`](lib/notifications/)
+
+Slack, Teams ed email al superamento di una soglia, **predefinita a "solo critici"**: un canale che riceve ogni rilievo viene silenziato entro una settimana, e da quel momento non avvisa più nemmeno dei critici.
+
+**Nessuna notifica fa fallire un audit** — il documento è già analizzato e il credito già consumato — ma un canale rotto viene *dichiarato*, perché un avviso che non parte in silenzio è peggio di un canale assente. Gli URL forniti dall'utente passano da [una guardia SSRF](lib/net/safe-url.ts) **al salvataggio e alla consegna**: `https://169.254.169.254/` non configura Slack, chiede alla nostra infrastruttura di leggere le proprie credenziali cloud. Il confronto sugli host noti è per sottodominio esatto, così `hooks.slack.com.evil.test` non passa.
+
+### Diagnostica — [`app/api/health/deep/`](app/api/health/deep/)
+
+`/api/health` risponde a "è configurato?". Questa rotta risponde a "risponde?": una connection string valida verso un database sospeso, una chiave revocata e un Redis irraggiungibile passano tutti il primo controllo e falliscono al primo utente. **Ogni numero è un round-trip reale**, cronometrato attorno alla chiamata — la stessa regola dei badge di Developer Mode. Una dipendenza *non configurata* non è un guasto: confonderle farebbe suonare l'allarme su ogni installazione minima.
 
 ---
 
@@ -243,8 +286,17 @@ Gli embedding del corpus sono memoizzati per identità dell'array, così il cost
 
 ```
 middleware.ts             Rate limiting di bordo su /api, prima che il corpo venga letto
+db/schema-app.sql         Utenti, workspace, audit archiviati, consumi, notifiche
 app/
   api/audit/route.ts      Audit in streaming NDJSON, con avanzamento reale (Edge)
+  api/auth/               Registrazione, accesso, uscita (Edge)
+  api/billing/checkout/   Avvio di Stripe Checkout
+  api/webhooks/stripe/    Webhook firmato, fail-closed sul segreto
+  api/health/deep/        Sonde reali su database, Redis e modello
+  history/                Cronologia del workspace e dettaglio di un audit
+  pricing/                Listino
+  settings/               Profilo, piano, avvisi al team, diagnostica
+  login/  register/       Autenticazione
   api/support/route.ts    Assistente di supporto in streaming, senza strumenti (Edge)
   api/chat/route.ts       Agente ReAct in streaming (Edge)
   api/extract/route.ts    Estrazione strutturata sincrona (Edge)
@@ -267,6 +319,16 @@ components/
   metrics-panel.tsx       Latenza, token, costo, step
   extractor-workbench.tsx Drag-and-drop, tabella entità, esportazione JSON
 lib/
+  auth/password.ts        PBKDF2 via Web Crypto, formato versionato
+  auth/session.ts         Cookie firmato HMAC, senza tabella di sessioni
+  auth/repository.ts      Account e workspace, con isolamento per organizzazione
+  audits/repository.ts    Archivio, filtri, versioni, confronto (puro)
+  billing/plans.ts        Listino: unica fonte per prezzi e limiti
+  billing/quota.ts        Verdetto di quota, puro e fail-closed
+  billing/stripe.ts       Checkout e verifica firma webhook, via REST
+  notifications/dispatch.ts  Slack, Teams ed email; non lancia mai
+  net/safe-url.ts         Guardia SSRF sugli URL forniti dall'utente
+  db/client.ts            Client PostgreSQL condiviso
   support/knowledge.ts    Prompt dell'assistente generato dalle costanti reali
   support/quick-prompts.ts  Etichette senza dipendenze, per il bundle client
   showcase/specs.ts       Catalogo delle decisioni mostrate in Developer Mode
@@ -294,7 +356,7 @@ lib/
   vector.ts               Edge RAG: embedding, RRF, ricerca ibrida
   schemas.ts              Contratti Zod condivisi
   metrics.ts              Token, costo, latenza (puro)
-tests/                    409 unit test
+tests/                    508 test
 db/schema.sql             pgvector + full-text + indici
 scripts/ingest.ts         Popolamento del vector store
 ```

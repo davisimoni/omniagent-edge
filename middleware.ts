@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { SESSION_COOKIE } from '@/lib/auth/session';
 import {
   checkRateLimit,
-  policyForPath,
+  policyForRequest,
   rateLimitHeaders,
   resolveIdentity,
 } from '@/lib/rate-limit';
@@ -29,7 +30,11 @@ function requestId(): string {
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const policy = policyForPath(request.nextUrl.pathname);
+  // La sola presenza del cookie basta: qui non si verifica la firma, si sceglie
+  // quale budget applicare. Un cookie falsificato porta alla quota autenticata,
+  // che la rotta rifiutera' comunque non trovando una sessione valida.
+  const hasSession = request.cookies.has(SESSION_COOKIE);
+  const policy = policyForRequest(request.nextUrl.pathname, hasSession);
   const correlationId = request.headers.get('x-request-id') ?? requestId();
 
   if (policy === null) {

@@ -46,6 +46,11 @@ export const RATE_LIMIT_POLICIES = {
   // chiamata, con un tetto di output basso e nessuno strumento. Quota alta per
   // non ostacolare una conversazione vera, e comunque un tetto.
   support: { name: 'support', limit: 40, windowMs: 60_000 },
+  // Audit senza account: la prova gratuita che rende la piattaforma valutabile
+  // senza registrarsi. Il tetto e' giornaliero e non al minuto, perche' qui il
+  // rischio non e' il picco ma il consumo continuo — ogni audit anonimo costa
+  // token e non e' imputabile a nessuna quota di piano.
+  auditAnonymous: { name: 'audit_anon', limit: 3, windowMs: 24 * 60 * 60 * 1000 },
   default: { name: 'default', limit: 60, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
@@ -452,11 +457,27 @@ export function rateLimitHeaders(decision: RateLimitDecision): Record<string, st
 }
 
 /** Politica applicabile a un percorso; `null` per ciò che non va limitato. */
+/**
+ * Politica per un percorso, tenendo conto della presenza di una sessione.
+ *
+ * Un audit anonimo e uno autenticato attingono a budget diversi: il primo e' una
+ * prova a nostro carico, il secondo scala dalla quota del piano. Distinguerli
+ * qui, sulla presenza del cookie, evita che la prova gratuita diventi un modo
+ * per usare il prodotto senza mai registrarsi.
+ */
+export function policyForRequest(pathname: string, hasSession: boolean): RateLimitPolicy | null {
+  if (pathname.startsWith('/api/audit') && !hasSession) return RATE_LIMIT_POLICIES.auditAnonymous;
+  return policyForPath(pathname);
+}
+
 export function policyForPath(pathname: string): RateLimitPolicy | null {
   if (!pathname.startsWith('/api/')) return null;
   // La diagnostica deve restare raggiungibile anche sotto pressione: è quella
   // che dice se il sistema è configurato, e serve proprio quando qualcosa va storto.
   if (pathname.startsWith('/api/health')) return null;
+  // Il webhook Stripe si autentica con la firma HMAC e viene ritentato da Stripe
+  // con backoff: un 429 qui farebbe perdere un cambio di piano gia' pagato.
+  if (pathname.startsWith('/api/webhooks/')) return null;
   if (pathname.startsWith('/api/audit')) return RATE_LIMIT_POLICIES.audit;
   if (pathname.startsWith('/api/chat')) return RATE_LIMIT_POLICIES.chat;
   if (pathname.startsWith('/api/extract')) return RATE_LIMIT_POLICIES.extract;

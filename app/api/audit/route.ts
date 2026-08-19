@@ -8,8 +8,15 @@ import {
   toAuditMetadata,
   type AuditInput,
 } from '@/lib/audit/engine';
-import { auditRequestSchema } from '@/lib/audit/schema';
-import type { AuditStreamEvent } from '@/lib/audit/stream';
+import { auditRequestSchema, type ContractAudit } from '@/lib/audit/schema';
+import type { AuditPersistence, AuditStreamEvent } from '@/lib/audit/stream';
+import { getCurrentAccount, isAuthAvailable } from '@/lib/auth/current-user';
+import type { AuthenticatedAccount } from '@/lib/auth/repository';
+import { saveAudit } from '@/lib/audits/repository';
+import { checkAuditQuota, recordUsage, type QuotaVerdict } from '@/lib/billing/quota';
+import { hasFeature } from '@/lib/billing/plans';
+import { buildAlert, dispatchAudit, getNotificationSettings } from '@/lib/notifications/dispatch';
+import { readEnv } from '@/lib/env';
 import { buildAuditTelemetry } from '@/lib/audit/telemetry';
 import { assessExtractedText } from '@/lib/ingestion/assess';
 import { normalizeUsage } from '@/lib/metrics';
@@ -43,6 +50,85 @@ export const dynamic = 'force-dynamic';
 function needsTranscription(input: AuditInput): boolean {
   if (input.attachment === undefined) return false;
   return assessExtractedText(input.text ?? null).needsOcr;
+}
+
+/**
+ * Archivia l'audit, scala il credito e avvisa il team.
+ *
+ * Non lancia mai. È eseguita dopo che il risultato è già stato spedito al
+ * client, quindi un'eccezione qui non produrrebbe un errore utile: cadrebbe
+ * dentro uno stream già aperto, dove diventa illeggibile. Ogni fallimento
+ * diventa invece un motivo dichiarato nell'evento `persisted`.
+ *
+ * L'ordine è deliberato: prima si salva, poi si scala il credito, poi si
+ * notifica. Scalare per primo addebiterebbe un audit che non è stato archiviato;
+ * notificare per primo manderebbe un avviso con un link a un report inesistente.
+ */
+async function persist(
+  account: AuthenticatedAccount | null,
+  audit: ContractAudit,
+): Promise<AuditPersistence> {
+  if (account === null) {
+    return {
+      recordId: null,
+      reason: isAuthAvailable()
+        ? 'Accedi per salvare gli audit nella cronologia del tuo workspace.'
+        : 'Archivio non disponibile su questa installazione (DATABASE_URL non configurata).',
+      remaining: null,
+      notified: [],
+    };
+  }
+
+  let recordId: string | null = null;
+  try {
+    const record = await saveAudit({
+      organizationId: account.organization.id,
+      userId: account.user.id,
+      audit,
+    });
+    recordId = record.id;
+  } catch (error) {
+    console.error('[api/audit] archiviazione fallita', error);
+    return {
+      recordId: null,
+      reason: 'L\'audit è stato completato ma non è stato possibile archiviarlo. Esportalo ora.',
+      remaining: null,
+      notified: [],
+    };
+  }
+
+  let remaining: number | null = null;
+  try {
+    await recordUsage({
+      organizationId: account.organization.id,
+      userId: account.user.id,
+      kind: 'audit',
+      costUsd: audit.metadata.telemetry.costUsd,
+    });
+    const updated = await checkAuditQuota(account.organization.id, account.organization.plan);
+    remaining = updated.remaining;
+  } catch (error) {
+    // Un credito non contato costa a noi. È il verso giusto in cui sbagliare.
+    console.error('[api/audit] registrazione consumo fallita', error);
+  }
+
+  let notified: AuditPersistence['notified'] = [];
+  try {
+    if (hasFeature(account.organization.plan, 'teamNotifications')) {
+      const settings = await getNotificationSettings(account.organization.id);
+      const baseUrl = readEnv('NEXT_PUBLIC_APP_URL') ?? null;
+      const result = await dispatchAudit(buildAlert(audit, baseUrl, recordId), settings);
+      notified = result.results.map((entry) => ({
+        channel: entry.channel,
+        delivered: entry.delivered,
+        reason: entry.reason,
+      }));
+    }
+  } catch (error) {
+    console.error('[api/audit] notifiche fallite', error);
+  }
+
+  return { recordId, reason: null, remaining, notified };
 }
 
 function json(status: number, body: unknown): Response {
@@ -90,6 +176,40 @@ export async function POST(request: Request): Promise<Response> {
         'ANTHROPIC_API_KEY non è configurata. Copia .env.example in .env.local e ' +
         'inserisci la chiave, oppure impostala fra le Environment Variables su Vercel.',
     });
+  }
+
+  // ── Quota ────────────────────────────────────────────────────────────────
+  // Il controllo precede l'analisi: superarlo dopo significherebbe aver già
+  // pagato i token di un audit che poi rifiutiamo di consegnare. Chi non è
+  // autenticato passa di qui senza quota di piano — il suo tetto è quello per
+  // indirizzo applicato dal middleware — e il suo audit non viene archiviato.
+  const account = await getCurrentAccount();
+  let quota: QuotaVerdict | null = null;
+
+  if (account !== null) {
+    try {
+      quota = await checkAuditQuota(account.organization.id, account.organization.plan);
+    } catch (error) {
+      // Fail-closed: un guasto del database non deve trasformarsi in audit
+      // illimitati per chiunque se ne accorga.
+      console.error('[api/audit] verifica quota fallita', error);
+      return json(503, {
+        error: 'quota_check_failed',
+        message: 'Non è stato possibile verificare la quota. Riprova fra un momento.',
+      });
+    }
+
+    if (!quota.allowed) {
+      return json(402, {
+        error: 'quota_exceeded',
+        message: quota.message,
+        plan: quota.plan,
+        limit: quota.limit,
+        used: quota.used,
+        resetsAt: quota.resetsAt,
+        suggestedPlan: quota.suggestedPlan,
+      });
+    }
   }
 
   const input = {
@@ -198,6 +318,12 @@ export async function POST(request: Request): Promise<Response> {
             costUsd: telemetry.costUsd,
           },
         });
+        // ── Persistenza e notifiche ──────────────────────────────────────
+        // Dopo il risultato, mai prima: l'utente ha già ciò per cui ha
+        // aspettato, e un guasto dell'archivio non deve fargli perdere
+        // l'analisi. Per lo stesso motivo niente qui può lanciare.
+        send({ type: 'persisted', persistence: await persist(account, audit) });
+
         send({ type: 'phase', phase: 'done' });
       } catch (error) {
         console.error('[api/audit] audit fallito', error);
