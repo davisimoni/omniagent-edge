@@ -4,9 +4,12 @@ import {
   AlertTriangle,
   BadgeCheck,
   CircleHelp,
+  Coins,
+  FileScan,
   FileWarning,
   Gauge,
   ListChecks,
+  ShieldAlert,
   ShieldQuestion,
 } from 'lucide-react';
 import { RiskHeatmap, RiskScoreDial } from '@/components/audit/risk-heatmap';
@@ -20,6 +23,8 @@ import {
   type RiskSeverity,
 } from '@/lib/audit/schema';
 import type { AuditMetrics } from '@/lib/audit/stream';
+import { STAGE_LABELS } from '@/lib/audit/telemetry';
+import { MODE_LABELS } from '@/lib/ingestion/modes';
 import { formatCostUsd, formatLatency, formatTokens } from '@/lib/metrics';
 import { cn } from '@/lib/utils';
 
@@ -107,6 +112,26 @@ export function AuditResult({
         >
           {summary.verdict}
         </p>
+
+        {/*
+          L'avviso di integrità sta sopra ogni rilievo, e in rosso pieno: non
+          descrive il contratto ma la controparte, ed è l'unica informazione di
+          questa pagina che cambia il modo in cui va letto tutto il resto.
+        */}
+        {summary.securityWarning !== null && (
+          <div
+            role="alert"
+            className="mt-3 flex items-start gap-2.5 rounded-lg border-2 border-danger bg-danger/15 px-3 py-2.5"
+          >
+            <ShieldAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-danger">Integrità del documento</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-danger">
+                {summary.securityWarning.replace(/\*\*/g, '')}
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ── Heatmap ────────────────────────────────────────────────────────── */}
@@ -284,6 +309,40 @@ export function AuditResult({
           Affidabilità di questa analisi
         </SectionTitle>
         <div className="space-y-2 rounded-lg border border-border bg-surface-raised p-3 text-xs leading-relaxed">
+          {/* Come è stato letto il documento decide che cosa dimostra una citazione. */}
+          <p className="flex items-start gap-1.5">
+            <FileScan className="mt-0.5 size-3.5 shrink-0 text-accent" aria-hidden="true" />
+            <span>
+              <Badge tone={audit.metadata.ingestion.sourceIsTranscript ? 'warning' : 'neutral'}>
+                {MODE_LABELS[audit.metadata.ingestion.mode]}
+              </Badge>{' '}
+              {summary.provenanceNote}
+            </span>
+          </p>
+
+          {audit.metadata.ingestion.warnings.map((warning) => (
+            <p key={warning} className="flex items-start gap-1.5 text-warning">
+              <CircleHelp className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {warning}
+            </p>
+          ))}
+
+          {audit.metadata.security.findings.length > 0 && (
+            <ul className="space-y-1 border-t border-border pt-2">
+              {audit.metadata.security.findings.map((finding) => (
+                <li key={`${finding.kind}-${finding.sample}`} className="flex items-start gap-1.5">
+                  <Badge tone={finding.severity === 'critical' ? 'danger' : 'warning'}>
+                    {finding.occurrences}×
+                  </Badge>
+                  <span>
+                    {finding.description}{' '}
+                    <code className="font-mono text-[10px] text-muted">{finding.sample}</code>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
           {summary.citationReliability === null ? (
             <p className="text-muted">
               Citazioni non verificate: il documento è stato analizzato come allegato senza testo
@@ -315,6 +374,66 @@ export function AuditResult({
           <p className="border-t border-border pt-2 text-[11px] text-muted">{audit.disclaimer}</p>
         </div>
       </section>
+
+      {/* ── Costo ──────────────────────────────────────────────────────────── */}
+      {audit.metadata.telemetry.stages.length > 0 && (
+        <section>
+          <SectionTitle icon={<Coins className="size-4" />}>Costo di questa analisi</SectionTitle>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <thead className="bg-surface-raised text-left text-[11px] uppercase tracking-wide text-muted">
+                <tr>
+                  <th scope="col" className="px-2.5 py-2 font-medium">Fase</th>
+                  <th scope="col" className="px-2.5 py-2 font-medium">Modello</th>
+                  <th scope="col" className="px-2.5 py-2 text-right font-medium">Token</th>
+                  <th scope="col" className="px-2.5 py-2 text-right font-medium">Costo</th>
+                  <th scope="col" className="px-2.5 py-2 text-right font-medium">Durata</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {audit.metadata.telemetry.stages.map((stage) => (
+                  <tr key={stage.stage}>
+                    <td className="px-2.5 py-2">{STAGE_LABELS[stage.stage]}</td>
+                    <td className="px-2.5 py-2 font-mono text-[10px] text-muted">
+                      {stage.modelId ?? '—'}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">
+                      {stage.totalTokens.toLocaleString('it-IT')}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">
+                      {formatCostUsd(stage.costUsd)}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">
+                      {formatLatency(stage.latencyMs)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-surface-raised font-medium">
+                  <td className="px-2.5 py-2" colSpan={2}>
+                    Totale
+                  </td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">
+                    {audit.metadata.telemetry.totalTokens.toLocaleString('it-IT')}
+                  </td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">
+                    {formatCostUsd(audit.metadata.telemetry.costUsd)}
+                  </td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">
+                    {formatLatency(audit.metadata.telemetry.latencyMs)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            Stima sul listino pubblico del modello
+            {audit.metadata.telemetry.costComplete
+              ? '. '
+              : '; una fase usa un modello a listino ignoto, quindi il totale è per difetto. '}
+            Il dato fatturato resta quello del fornitore.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

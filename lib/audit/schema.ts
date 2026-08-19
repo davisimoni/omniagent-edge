@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import type { AuditTelemetry } from '@/lib/audit/telemetry';
+import type { IngestionSummary } from '@/lib/ingestion/pipeline';
+import type { SecuritySummary } from '@/lib/security/prompt-injection';
 
 /**
  * Contratti dati del motore di audit.
@@ -307,6 +310,112 @@ export const citationAuditSchema = z.object({
 });
 export type CitationAudit = z.infer<typeof citationAuditSchema>;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Metadati: telemetria, acquisizione, sicurezza
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const tokenUsageSchema = z.object({
+  inputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  reasoningTokens: z.number().int().min(0),
+  cacheReadTokens: z.number().int().min(0),
+  cacheWriteTokens: z.number().int().min(0),
+});
+
+export const stageCostSchema = z.object({
+  stage: z.enum(['ingestion', 'analysis']),
+  modelId: z.string().nullable(),
+  usage: tokenUsageSchema,
+  totalTokens: z.number().int().min(0),
+  costUsd: z.number().nullable(),
+  latencyMs: z.number().int().min(0),
+});
+
+export const auditTelemetrySchema = z.object({
+  stages: z.array(stageCostSchema),
+  usage: tokenUsageSchema,
+  totalTokens: z.number().int().min(0),
+  costUsd: z.number().nullable(),
+  costComplete: z.boolean(),
+  latencyMs: z.number().int().min(0),
+});
+
+export const textAssessmentSchema = z.object({
+  quality: z.enum(['rich', 'sparse', 'empty']),
+  characters: z.number().int().min(0),
+  wordCount: z.number().int().min(0),
+  pageCount: z.number().int().nullable(),
+  charactersPerPage: z.number().nullable(),
+  alphanumericRatio: z.number().min(0).max(1),
+  replacementRatio: z.number().min(0).max(1),
+  needsOcr: z.boolean(),
+  reason: z.string(),
+});
+
+export const ocrSummarySchema = z.object({
+  attempted: z.boolean(),
+  succeeded: z.boolean(),
+  pageCount: z.number().int().nullable(),
+  legiblePages: z.number().int().nullable(),
+  confidence: z.number().min(0).max(1).nullable(),
+  hasHandwriting: z.boolean(),
+  hasSignatures: z.boolean(),
+  failureReason: z.string().nullable(),
+});
+
+export const ingestionSummarySchema = z.object({
+  mode: z.enum(['text', 'ocr_fallback', 'ocr_primary', 'attachment_passthrough']),
+  assessment: textAssessmentSchema,
+  ocr: ocrSummarySchema,
+  sourceIsTranscript: z.boolean(),
+  warnings: z.array(z.string()),
+});
+
+export const injectionFindingSchema = z.object({
+  kind: z.enum([
+    'invisible_characters',
+    'instruction_override',
+    'role_impersonation',
+    'output_steering',
+    'tool_mimicry',
+    'encoded_payload',
+  ]),
+  severity: z.enum(['medium', 'high', 'critical']),
+  description: z.string(),
+  sample: z.string(),
+  occurrences: z.number().int().min(0),
+});
+
+export const securitySummarySchema = z.object({
+  scanned: z.boolean(),
+  findings: z.array(injectionFindingSchema),
+  removedCharacters: z.number().int().min(0),
+  highestSeverity: z.enum(['medium', 'high', 'critical']).nullable(),
+  hasHiddenContent: z.boolean(),
+});
+
+export const auditMetadataSchema = z.object({
+  telemetry: auditTelemetrySchema,
+  ingestion: ingestionSummarySchema,
+  security: securitySummarySchema,
+});
+
+/**
+ * Il tipo TypeScript viene dai moduli che lo producono, non da `z.infer`.
+ *
+ * Zod inferisce array mutabili; telemetria, acquisizione e sicurezza li
+ * dichiarano `readonly` perché sono risultati, non accumulatori. Derivare il
+ * tipo dallo schema costringerebbe a rendere mutabile ciò che non deve esserlo,
+ * o a copiare ogni array a ogni passaggio. Lo schema resta la validazione a
+ * runtime — è lui a governare il JSON esportato — e i controlli di parità in
+ * fondo al file impediscono ai due di divergere.
+ */
+export interface AuditMetadata {
+  readonly telemetry: AuditTelemetry;
+  readonly ingestion: IngestionSummary;
+  readonly security: SecuritySummary;
+}
+
 /**
  * Risultato completo dell'audit.
  *
@@ -314,6 +423,13 @@ export type CitationAudit = z.infer<typeof citationAuditSchema>;
  * rischio, clausole mancanti, violazioni di SLA e raccomandazioni operative —
  * sono qui campi di primo livello, non annidati: sono ciò che il report espone e
  * ciò che l'esportazione JSON deve contenere senza dover essere navigata.
+ *
+ * `metadata` porta con sé come il documento è stato letto, che cosa ha trovato
+ * la scansione di sicurezza e quanto è costata l'analisi. Sta **dentro** l'audit
+ * e non accanto perché il JSON esportato è ciò che finisce in un archivio o
+ * allegato a una mail: separare il risultato dalle condizioni in cui è stato
+ * prodotto significa che, sei mesi dopo, nessuno saprà più se quelle citazioni
+ * fossero verificate contro il PDF o contro una sua trascrizione.
  */
 export const contractAuditSchema = z.object({
   auditId: z.string(),
@@ -329,9 +445,30 @@ export const contractAuditSchema = z.object({
   clausesAssessed: z.number().int().min(0),
   clausesInCatalog: z.number().int().min(0),
   citationAudit: citationAuditSchema,
+  metadata: auditMetadataSchema,
   disclaimer: z.string(),
 });
-export type ContractAudit = z.infer<typeof contractAuditSchema>;
+
+/** Come sopra: `metadata` conserva i tipi readonly dei moduli che lo popolano. */
+export type ContractAudit = Omit<z.infer<typeof contractAuditSchema>, 'metadata'> & {
+  readonly metadata: AuditMetadata;
+};
+
+/**
+ * Controllo di parità a compile time fra gli schemi Zod qui sopra e i tipi
+ * prodotti dai moduli che li popolano.
+ *
+ * Senza, aggiungere un campo a `IngestionSummary` compilerebbe senza errori e
+ * lo schema lo scarterebbe in silenzio: il campo sparirebbe dal JSON esportato e
+ * nessuno se ne accorgerebbe finché qualcuno non andasse a cercarlo. La
+ * direzione del controllo è `z.infer extends Tipo` e non il contrario, perché
+ * gli array di Zod sono mutabili mentre i tipi di origine li dichiarano
+ * `readonly` — e un array mutabile è assegnabile a uno readonly, non viceversa.
+ */
+type AssertExtends<A extends B, B> = A;
+type _TelemetryParity = AssertExtends<z.infer<typeof auditTelemetrySchema>, AuditTelemetry>;
+type _IngestionParity = AssertExtends<z.infer<typeof ingestionSummarySchema>, IngestionSummary>;
+type _SecurityParity = AssertExtends<z.infer<typeof securitySummarySchema>, SecuritySummary>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ingresso

@@ -172,6 +172,7 @@ export function AuditWorkbench() {
       clausesTotal: CLAUSE_CATALOG.length,
       redFlags: 0,
       slaCommitments: 0,
+      transcribed: false,
     });
 
     const observedMetrics = metricRows
@@ -222,7 +223,17 @@ export function AuditWorkbench() {
 
       for await (const event of readNdjsonStream<AuditStreamEvent>(response.body)) {
         if (event.type === 'phase') {
-          setProgress((current) => (current === null ? current : { ...current, phase: event.phase }));
+          setProgress((current) =>
+            current === null
+              ? current
+              : {
+                  ...current,
+                  phase: event.phase,
+                  // Una volta trascritto resta trascritto: la barra non deve
+                  // arretrare quando l'analisi subentra alla lettura visiva.
+                  transcribed: current.transcribed || event.phase === 'transcribing',
+                },
+          );
         } else if (event.type === 'progress') {
           setProgress((current) =>
             current === null

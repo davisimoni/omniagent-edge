@@ -20,14 +20,28 @@ export interface AuditProgressState {
   readonly clausesTotal: number;
   readonly redFlags: number;
   readonly slaCommitments: number;
+  /** True se il documento è passato dalla lettura visiva: sposta la base della barra. */
+  readonly transcribed: boolean;
 }
 
-const VISIBLE_PHASES = AUDIT_PHASES.filter((phase) => phase !== 'queued' && phase !== 'done');
+const ALL_PHASES = AUDIT_PHASES.filter((phase) => phase !== 'queued' && phase !== 'done');
 
 export function AuditProgress({ state }: { state: AuditProgressState }) {
-  const progress = computeProgress(state.phase, state.clausesAssessed, state.clausesTotal);
+  // La trascrizione compare nell'elenco solo quando avviene davvero: mostrarla
+  // sempre, spenta, farebbe sembrare saltato un passaggio che su un PDF testuale
+  // non ha ragione di esistere.
+  const visiblePhases = state.transcribed
+    ? ALL_PHASES
+    : ALL_PHASES.filter((phase) => phase !== 'transcribing');
+
+  const progress = computeProgress(
+    state.phase,
+    state.clausesAssessed,
+    state.clausesTotal,
+    state.transcribed,
+  );
   const percent = Math.round(progress * 100);
-  const activeIndex = VISIBLE_PHASES.indexOf(state.phase as (typeof VISIBLE_PHASES)[number]);
+  const activeIndex = visiblePhases.indexOf(state.phase as (typeof visiblePhases)[number]);
 
   return (
     <div className="rounded-xl border border-border bg-surface-raised p-4">
@@ -54,7 +68,7 @@ export function AuditProgress({ state }: { state: AuditProgressState }) {
       </div>
 
       <ol className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-        {VISIBLE_PHASES.map((phase, index) => {
+        {visiblePhases.map((phase, index) => {
           const done = activeIndex > index || state.phase === 'done';
           const active = state.phase === phase;
           return (

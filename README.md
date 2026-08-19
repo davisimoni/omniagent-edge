@@ -22,7 +22,9 @@ Vercel AI SDK 7 · Claude Opus 5 · Zod 4 · Neon serverless (pgvector) · Vites
 | **Edge RAG** | [`lib/vector.ts`](lib/vector.ts) | Ricerca ibrida vettoriale + full-text, fusa con Reciprocal Rank Fusion |
 | **Estrattore** | [`app/extractor/page.tsx`](app/extractor/page.tsx) | Drag-and-drop → JSON validato, con citazione a supporto di ogni entità |
 | **Dashboard** | [`app/page.tsx`](app/page.tsx) | Timeline ReAct + telemetria di run, tema chiaro/scuro, mobile-first |
-| **Test** | [`tests/`](tests/) | 249 unit test su audit, strumenti, fusione, connettori, metriche e schemi |
+| **Sicurezza** | [`lib/rate-limit.ts`](lib/rate-limit.ts) · [`middleware.ts`](middleware.ts) | Rate limiting a finestra scorrevole e difesa anti prompt injection |
+| **Ingestion** | [`lib/ingestion/`](lib/ingestion/) | Rilevamento dei PDF scansionati e ripiego su lettura visiva |
+| **Test** | [`tests/`](tests/) | 362 unit test su audit, sicurezza, ingestion, strumenti, metriche e schemi |
 
 ### I sei strumenti dell'agente
 
@@ -91,6 +93,49 @@ JSON (l'oggetto `ContractAudit` integrale, validato contro il proprio schema Zod
 ### Che cosa questo motore NON è
 
 Non è uno strumento di conformità e non certifica nulla. La valutazione di adeguatezza, la decisione di firmare e la responsabilità verso le autorità di controllo restano in capo al titolare. L'avvertenza accompagna ogni audit — in interfaccia, nel JSON esportato e nel PDF — perché un rilievo generato da un modello e presentato come verdetto sposta sull'utente una responsabilità che non ha modo di valutare. Uno strumento che accelera una revisione legale è utile; uno che sembra sostituirla è un danno.
+
+---
+
+## Difese e acquisizione
+
+### Rate limiting — [`lib/rate-limit.ts`](lib/rate-limit.ts), [`middleware.ts`](middleware.ts)
+
+Finestra scorrevole su Upstash Redis, con ripiego in memoria. Le quote sono per **costo**, non per uniformità: `/api/audit` ne ha 10 al minuto contro le 30 di `/api/chat`, perché un audit su quaranta pagine costa ordini di grandezza più di una ricerca.
+
+Il protocollo REST di Upstash è parlato direttamente — `INCR` + `PEXPIRE NX` + `GET` in una sola pipeline, un round-trip. Costa trenta righe, toglie due dipendenze dal middleware (che gira su *ogni* richiesta) e rende lo store sostituibile nei test senza montare un finto modulo.
+
+Quattro decisioni che vale la pena guardare:
+
+- **`x-forwarded-for` non viene letto per primo.** È un header che il client può scrivere: chi vuole quota infinita lo cambia a ogni richiesta. Si usa `x-vercel-forwarded-for`, che scrive la piattaforma; di XFF si prende semmai l'**ultimo** salto, non il primo. C'è un test dedicato a questo aggiramento.
+- **Gli IP diventano digest prima di toccare Redis.** Un indirizzo IP è un dato personale (art. 4 GDPR): tenerlo in chiaro come chiave costruisce un registro di chi ha usato il servizio e quando, su un archivio di terza parte, per una finalità non dichiarata. Il sale evita che i quattro miliardi di IPv4 si provino in pochi minuti.
+- **Con Redis irraggiungibile non si apre e non si chiude: si ripiega in memoria.** Aprire lascerebbe la spesa in token senza argine proprio quando l'infrastruttura è in difficoltà; chiudere trasformerebbe un guasto Redis in un'interruzione del prodotto.
+- **Il ripiego in memoria è per istanza, e lo dichiara.** Con quattro istanze attive il limite effettivo è quattro volte quello configurato. `x-ratelimit-degraded: true` lo dice invece di lasciar credere il contrario: un limitatore che *sembra* funzionare è peggio di uno assente.
+
+### Prompt injection — [`lib/security/prompt-injection.ts`](lib/security/prompt-injection.ts)
+
+Qui il modello di minaccia è insolito, ed è il motivo per cui il modulo esiste. Di solito chi carica un file è la vittima potenziale. In un audit no: **il documento è scritto dal fornitore, cioè dalla parte che l'analisi giudica**, e che ha un interesse economico diretto a farla uscire pulita. Testo bianco su bianco a fondo pagina, caratteri a larghezza zero, una riga che nessun umano leggerà mai — e l'audit riporta zero rilievi su un contratto che ne ha dodici.
+
+**La regola: si neutralizza e si dichiara, non si cancella.** Rimuovere testo visibile significherebbe analizzare un documento diverso da quello sul tavolo, e manderebbe in pezzi il controllo su cui si regge tutto il resto — la verifica delle citazioni. Vengono tolti solo i caratteri **invisibili**, che in un contratto non hanno uso legittimo; il resto viene segnalato all'utente e, quando l'occultamento è provato, compare in testa al report come avviso di integrità.
+
+L'ordine conta: prima si rimuovono i caratteri invisibili, poi si cercano le frasi. Un `i<ZWSP>gnora le istruzioni precedenti` sfugge a qualunque regex sul testo grezzo, ed è esattamente ciò che il modello legge senza problemi. Le regole sono deliberatamente specifiche: un test verifica che il contratto di esempio — pieno di clausole problematiche ma non manipolato — **non** faccia scattare nulla, perché un allarme che scatta sempre viene disattivato dopo tre giorni.
+
+L'avviso di manomissione sta **fuori** da `redFlags`, e non per distrazione: quell'array ha un invariante — ogni voce porta una citazione ritrovata nel documento — e un rilievo sui caratteri invisibili non può averla, dato che quei caratteri sono stati rimossi. Infilarlo lì falserebbe il conteggio di affidabilità delle citazioni.
+
+### Ingestion e fallback OCR — [`lib/ingestion/`](lib/ingestion/)
+
+Un PDF scansionato è, per un estrattore di testo, un PDF vuoto. Non fallisce: restituisce zero caratteri. Se nessuno se ne accorge, l'audit gira su una stringa vuota e riporta con la massima serietà che il contratto **manca di venti clausole su venti** — un risultato catastrofico, sicuro di sé e completamente falso. È il peggior modo di sbagliare per questo prodotto, e [`assess.ts`](lib/ingestion/assess.ts) esiste per intercettarlo: caratteri per pagina, quota di alfanumerici, caratteri di sostituzione.
+
+Quando il testo manca o è degradato, la pipeline ripiega sulla lettura visiva del modello e ne ricava una trascrizione. **Perché trascrivere invece di dare il PDF direttamente al modello di audit** — che lo leggerebbe benissimo: senza un testo sorgente la verifica delle citazioni non ha nulla da confrontare, restituisce `no-source` su ogni rilievo, e il controllo che regge l'affidabilità dell'audit si spegne in silenzio proprio sui documenti peggiori. La trascrizione ricrea quel sorgente.
+
+Il limite viene detto, non nascosto: su una scansione una citazione verificata dimostra che il rilievo è coerente con la **trascrizione**, non con l'originale. `provenanceNote()` lo scrive nel report, perché è la sfumatura che sparisce quando il documento viene letto sei mesi dopo da qualcun altro.
+
+Il ripiego è trasparente ma non silenzioso, e degrada invece di interrompere: se la trascrizione fallisce, l'allegato passa comunque al modello di audit con meno garanzie e un avviso esplicito.
+
+### Costi per fase — [`lib/audit/telemetry.ts`](lib/audit/telemetry.ts)
+
+Ogni audit riporta token, costo stimato e durata **per fase** — lettura e analisi — dentro `audit.metadata.telemetry`, quindi anche nel JSON esportato e nel PDF. Non è un totale unico per una ragione precisa: su una scansione le due fasi hanno profili opposti (la trascrizione produce migliaia di token di output, l'analisi ne consuma in input) e il totale nasconde quale delle due stia spendendo. Sapere che a costare è l'OCR è l'unica informazione a partire dalla quale si può decidere qualcosa — per esempio chiedere ai fornitori contratti in PDF testuale.
+
+Se una fase usa un modello a listino ignoto, `costComplete: false` dichiara il totale per difetto invece di restituire `null` e perdere anche la parte nota.
 
 ---
 
@@ -168,6 +213,7 @@ Gli embedding del corpus sono memoizzati per identità dell'array, così il cost
 ## Struttura
 
 ```
+middleware.ts             Rate limiting di bordo su /api, prima che il corpo venga letto
 app/
   api/audit/route.ts      Audit in streaming NDJSON, con avanzamento reale (Edge)
   api/chat/route.ts       Agente ReAct in streaming (Edge)
@@ -186,6 +232,13 @@ components/
   metrics-panel.tsx       Latenza, token, costo, step
   extractor-workbench.tsx Drag-and-drop, tabella entità, esportazione JSON
 lib/
+  rate-limit.ts           Finestra scorrevole, Upstash via REST, ripiego in memoria
+  security/prompt-injection.ts  Sanitizzazione e rilevamento nei documenti non fidati
+  ingestion/assess.ts     Rileva i PDF scansionati prima che l'audit giri sul vuoto (puro)
+  ingestion/ocr.ts        Trascrizione visiva: ricrea il sorgente per le citazioni
+  ingestion/pipeline.ts   Testo / scansione / allegato: un percorso unico, degrada e lo dice
+  ingestion/modes.ts      Etichette senza dipendenze: tiene l'SDK fuori dal bundle client
+  audit/telemetry.ts      Token, costo e durata per fase (puro)
   audit/schema.ts         Contratti Zod: cosa produce il modello, cosa calcoliamo noi
   audit/clauses.ts        Catalogo delle 20 clausole attese
   audit/scoring.ts        Punteggio, clausole mancanti, raccomandazioni (puro)
@@ -203,7 +256,7 @@ lib/
   vector.ts               Edge RAG: embedding, RRF, ricerca ibrida
   schemas.ts              Contratti Zod condivisi
   metrics.ts              Token, costo, latenza (puro)
-tests/                    249 unit test
+tests/                    362 unit test
 db/schema.sql             pgvector + full-text + indici
 scripts/ingest.ts         Popolamento del vector store
 ```

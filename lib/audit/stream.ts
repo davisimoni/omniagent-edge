@@ -17,6 +17,7 @@ import type { ContractAudit } from '@/lib/audit/schema';
 export const AUDIT_PHASES = [
   'queued',
   'reading',
+  'transcribing',
   'analyzing',
   'verifying',
   'scoring',
@@ -27,6 +28,7 @@ export type AuditPhase = (typeof AUDIT_PHASES)[number];
 export const PHASE_LABELS: Readonly<Record<AuditPhase, string>> = {
   queued: 'In coda',
   reading: 'Lettura del documento',
+  transcribing: 'Trascrizione delle pagine',
   analyzing: 'Analisi delle clausole',
   verifying: 'Verifica delle citazioni',
   scoring: 'Calcolo del punteggio',
@@ -36,7 +38,8 @@ export const PHASE_LABELS: Readonly<Record<AuditPhase, string>> = {
 /** Peso di ciascuna fase sulla barra: l'analisi domina, il resto è quasi istantaneo. */
 export const PHASE_WEIGHTS: Readonly<Record<AuditPhase, number>> = {
   queued: 0,
-  reading: 0.08,
+  reading: 0.06,
+  transcribing: 0.34,
   analyzing: 0.82,
   verifying: 0.94,
   scoring: 0.98,
@@ -70,17 +73,27 @@ export type AuditStreamEvent =
  *
  * Durante l'analisi — la fase lunga — l'avanzamento interpola sulla quota di
  * clausole già valutate, così la barra si muove per un motivo verificabile.
+ *
+ * `transcribed` esiste per un motivo preciso: la trascrizione avviene solo sui
+ * documenti scansionati. Senza questo parametro l'analisi ripartirebbe sempre
+ * dal peso di `reading`, e su un PDF appena trascritto la barra tornerebbe
+ * indietro dal 34% al 6%. Una barra che arretra è peggio di una barra ferma:
+ * comunica che qualcosa è andato storto proprio mentre tutto procede.
  */
 export function computeProgress(
   phase: AuditPhase,
   clausesAssessed: number,
   clausesTotal: number,
+  transcribed = false,
 ): number {
+  const base = transcribed ? PHASE_WEIGHTS.transcribing : PHASE_WEIGHTS.reading;
   if (phase !== 'analyzing') return PHASE_WEIGHTS[phase];
-  if (clausesTotal <= 0) return PHASE_WEIGHTS.reading;
-  const span = PHASE_WEIGHTS.analyzing - PHASE_WEIGHTS.reading;
+  if (clausesTotal <= 0) return base;
+  const span = PHASE_WEIGHTS.analyzing - base;
   const ratio = Math.min(1, Math.max(0, clausesAssessed / clausesTotal));
-  return PHASE_WEIGHTS.reading + span * ratio;
+  // Arrotondato: `0.06 + 0.76` in virgola mobile non è `0.82`, e una barra di
+  // avanzamento non ha alcun bisogno della quindicesima cifra decimale.
+  return Math.round((base + span * ratio) * 10_000) / 10_000;
 }
 
 /**

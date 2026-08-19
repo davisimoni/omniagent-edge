@@ -4,6 +4,7 @@ import {
   type ContractAudit,
   type RiskBand,
 } from '@/lib/audit/schema';
+import { STAGE_LABELS } from '@/lib/audit/telemetry';
 
 /**
  * Composizione del report esecutivo.
@@ -36,6 +37,80 @@ export const BAND_VERDICTS: Readonly<Record<RiskBand, string>> = {
     'Non firmare senza revisione legale. Sono presenti rilievi critici che espongono a sanzione, interruzione del servizio o responsabilità non limitata.',
 };
 
+/**
+ * Avviso di manomissione del documento.
+ *
+ * Sta **fuori** dall'elenco dei rilievi, e la scelta è deliberata. `redFlags`
+ * ha un invariante: ogni voce porta una citazione ritrovata nel documento. Un
+ * rilievo sintetico sui caratteri invisibili non può averla — quei caratteri
+ * sono stati rimossi, e citarli è impossibile per costruzione — quindi
+ * infilarlo lì dentro romperebbe proprio il controllo che rende credibile tutto
+ * il resto, e falserebbe il conteggio di affidabilità delle citazioni.
+ *
+ * Non per questo è un dettaglio minore: è probabilmente l'informazione più
+ * importante dell'intero audit, perché non parla del contratto ma della
+ * controparte. Compare quindi in testa al report, accanto al giudizio, dove non
+ * si può non vederla.
+ */
+export function securityWarning(audit: ContractAudit): string | null {
+  const security = audit.metadata.security;
+  if (!security.scanned) return null;
+
+  if (security.hasHiddenContent) {
+    return (
+      `**Il documento contiene ${security.removedCharacters} caratteri invisibili.** Si tratta di ` +
+      'testo che nessun lettore umano vede e che un sistema automatico legge come contenuto. ' +
+      "In un contratto non esiste un uso legittimo di questi caratteri: prima di dare peso a " +
+      "quest'analisi, verifica il documento in originale e valuta la circostanza con chi lo ha trasmesso."
+    );
+  }
+
+  const steering = security.findings.filter(
+    (finding) => finding.kind === 'output_steering' || finding.kind === 'instruction_override',
+  );
+  if (steering.length > 0) {
+    return (
+      'Il documento contiene frasi rivolte a un sistema automatico, che tentano di indirizzarne ' +
+      "l'esito. Sono state trattate come testo del contratto e non eseguite, ma la loro presenza " +
+      'in un documento contrattuale merita una spiegazione da parte di chi lo ha redatto.'
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Che cosa dimostra, esattamente, una citazione verificata.
+ *
+ * Su un testo incollato dimostra che il passaggio è nel documento. Su una
+ * scansione trascritta dal modello dimostra che è nella *trascrizione*, che è
+ * un'affermazione più debole. Confondere le due cose significa attribuire a un
+ * audit una solidità che non ha, ed è il genere di sfumatura che sparisce
+ * quando il report viene letto sei mesi dopo da qualcun altro.
+ */
+export function provenanceNote(audit: ContractAudit): string {
+  const { ingestion } = audit.metadata;
+
+  if (ingestion.mode === 'attachment_passthrough') {
+    return (
+      "Il documento è stato analizzato come allegato, senza estrazione del testo: le citazioni " +
+      'non sono state verificate contro alcun sorgente e vanno controllate a mano.'
+    );
+  }
+
+  if (ingestion.sourceIsTranscript) {
+    const confidence = ingestion.ocr.confidence;
+    return (
+      'Il documento era una scansione: il testo analizzato è una trascrizione prodotta ' +
+      `automaticamente${confidence !== null ? ` (confidenza ${Math.round(confidence * 100)}%)` : ''}. ` +
+      'Le citazioni verificate dimostrano che il rilievo è coerente con la trascrizione, non con ' +
+      "l'originale scansionato: per un uso negoziale, riscontrale sul documento firmato."
+    );
+  }
+
+  return 'Le citazioni sono state verificate contro il testo del documento fornito.';
+}
+
 export interface ExecutiveSummary {
   readonly auditId: string;
   readonly sourceName: string;
@@ -52,6 +127,12 @@ export interface ExecutiveSummary {
   /** Quota di citazioni confermate nel documento: la misura di affidabilità dell'audit. */
   readonly citationReliability: number | null;
   readonly coverageComplete: boolean;
+  /** Avviso di manomissione del documento; `null` se la scansione non ha trovato nulla. */
+  readonly securityWarning: string | null;
+  /** Che cosa dimostra una citazione verificata, dato come è stato letto il documento. */
+  readonly provenanceNote: string;
+  readonly costUsd: number | null;
+  readonly totalTokens: number;
   readonly disclaimer: string;
 }
 
@@ -96,6 +177,10 @@ export function buildExecutiveSummary(audit: ContractAudit): ExecutiveSummary {
     missingClauseCount: audit.missingClauses.length,
     citationReliability: citationReliability(audit),
     coverageComplete: audit.clausesAssessed === audit.clausesInCatalog,
+    securityWarning: securityWarning(audit),
+    provenanceNote: provenanceNote(audit),
+    costUsd: audit.metadata.telemetry.costUsd,
+    totalTokens: audit.metadata.telemetry.totalTokens,
     disclaimer: audit.disclaimer,
   };
 }
@@ -126,6 +211,16 @@ export function buildExecutiveReport(audit: ContractAudit): string {
   lines.push('');
   lines.push(summary.verdict);
   lines.push('');
+
+  // L'avviso di manomissione precede tutto il resto: non parla del contratto,
+  // parla di chi lo ha trasmesso, e chi legge deve incontrarlo prima di farsi
+  // un'idea sui rilievi.
+  if (summary.securityWarning !== null) {
+    lines.push(`> ⚠️ **Attenzione — integrità del documento**`);
+    lines.push('>');
+    lines.push(`> ${summary.securityWarning.replace(/\n/g, ' ')}`);
+    lines.push('');
+  }
   lines.push(
     `| Audit | Data | Documento | Rilievi | SLA disattesi | Clausole mancanti |`,
   );
@@ -229,6 +324,8 @@ export function buildExecutiveReport(audit: ContractAudit): string {
   // ── Affidabilità ──────────────────────────────────────────────────────────
   lines.push('## Affidabilità di questa analisi');
   lines.push('');
+  lines.push(summary.provenanceNote);
+  lines.push('');
   if (summary.citationReliability === null) {
     lines.push(
       'Le citazioni non sono state verificate: il documento è stato analizzato come allegato ' +
@@ -253,9 +350,49 @@ export function buildExecutiveReport(audit: ContractAudit): string {
     lines.push('');
   }
 
+  for (const warning of audit.metadata.ingestion.warnings) {
+    lines.push(`- ${warning}`);
+  }
+  if (audit.metadata.ingestion.warnings.length > 0) lines.push('');
+
+  // ── Costo ─────────────────────────────────────────────────────────────────
+  const telemetry = audit.metadata.telemetry;
+  if (telemetry.stages.length > 0) {
+    lines.push('## Costo di questa analisi');
+    lines.push('');
+    lines.push('| Fase | Modello | Token | Costo stimato | Durata |');
+    lines.push('|---|---|---|---|---|');
+    for (const stage of telemetry.stages) {
+      lines.push(
+        `| ${STAGE_LABELS[stage.stage]} | ${stage.modelId ?? '—'} | ` +
+          `${stage.totalTokens.toLocaleString('it-IT')} | ${formatUsd(stage.costUsd)} | ` +
+          `${(stage.latencyMs / 1000).toFixed(1)} s |`,
+      );
+    }
+    lines.push(
+      `| **Totale** | | **${telemetry.totalTokens.toLocaleString('it-IT')}** | ` +
+        `**${formatUsd(telemetry.costUsd)}** | **${(telemetry.latencyMs / 1000).toFixed(1)} s** |`,
+    );
+    lines.push('');
+    lines.push(
+      '_Il costo è una stima basata sul listino pubblico del modello' +
+        (telemetry.costComplete
+          ? '.'
+          : '; una delle fasi usa un modello a listino ignoto, quindi il totale è per difetto.') +
+        ' Il dato fatturato resta quello del fornitore._',
+    );
+    lines.push('');
+  }
+
   lines.push('---');
   lines.push('');
   lines.push(`_${audit.disclaimer}_`);
 
   return lines.join('\n');
+}
+
+function formatUsd(value: number | null): string {
+  if (value === null) return 'n/d';
+  if (value === 0) return '$0';
+  return value < 0.01 ? `$${value.toFixed(5)}` : `$${value.toFixed(4)}`;
 }

@@ -1,9 +1,18 @@
 import { hasModelCredentials, getModelId } from '@/lib/ai/model';
 import { CLAUSE_CATALOG } from '@/lib/audit/clauses';
-import { assembleAudit, buildAuditContext, streamAuditFindings } from '@/lib/audit/engine';
+import {
+  assembleAudit,
+  buildAuditContext,
+  prepareAuditInput,
+  streamAuditFindings,
+  toAuditMetadata,
+  type AuditInput,
+} from '@/lib/audit/engine';
 import { auditRequestSchema } from '@/lib/audit/schema';
 import type { AuditStreamEvent } from '@/lib/audit/stream';
-import { estimateCostUsd, normalizeUsage } from '@/lib/metrics';
+import { buildAuditTelemetry } from '@/lib/audit/telemetry';
+import { assessExtractedText } from '@/lib/ingestion/assess';
+import { normalizeUsage } from '@/lib/metrics';
 import { base64ByteLength, MAX_ATTACHMENT_BYTES } from '@/lib/schemas';
 
 /**
@@ -22,6 +31,19 @@ import { base64ByteLength, MAX_ATTACHMENT_BYTES } from '@/lib/schemas';
 export const runtime = 'edge';
 export const preferredRegion = ['fra1'];
 export const dynamic = 'force-dynamic';
+
+/**
+ * Vale la pena annunciare la trascrizione?
+ *
+ * Serve a decidere se mostrare la fase 'transcribing' *prima* di iniziarla: la
+ * pipeline lo saprebbe con certezza solo dopo, e a quel punto l'utente avrebbe
+ * gia' fissato una barra ferma per il tempo di una lettura visiva completa.
+ * La stessa valutazione che usa la pipeline, applicata in anticipo.
+ */
+function needsTranscription(input: AuditInput): boolean {
+  if (input.attachment === undefined) return false;
+  return assessExtractedText(input.text ?? null).needsOcr;
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -77,7 +99,6 @@ export async function POST(request: Request): Promise<Response> {
     observedMetrics: observedMetrics ?? [],
     annualValueOverride: annualValueOverride ?? null,
   };
-  const context = buildAuditContext(input);
   const modelId = getModelId();
   const encoder = new TextEncoder();
 
@@ -90,7 +111,26 @@ export async function POST(request: Request): Promise<Response> {
       try {
         send({ type: 'phase', phase: 'reading' });
 
-        const result = streamAuditFindings(input);
+        // Acquisizione: valuta il testo, ripiega sulla lettura visiva se il PDF
+        // è una scansione, e in entrambi i casi passa dalla scansione
+        // anti-injection prima che una sola riga raggiunga il modello di audit.
+        if (needsTranscription(input)) send({ type: 'phase', phase: 'transcribing' });
+        const { ingestion, modelInput } = await prepareAuditInput(input);
+        const context = buildAuditContext({ ...input, text: modelInput.text });
+
+        if (ingestion.text === null && ingestion.attachment === null) {
+          send({
+            type: 'error',
+            error: 'no_readable_content',
+            message:
+              'Non è stato possibile ricavare testo dal documento. Incolla il contenuto oppure ' +
+              'carica un PDF leggibile.',
+          });
+          return;
+        }
+
+        const analysisStartedAt = Date.now();
+        const result = streamAuditFindings(modelInput);
         send({ type: 'phase', phase: 'analyzing' });
 
         // Si emette solo quando un conteggio cambia davvero: un evento per ogni
@@ -116,21 +156,46 @@ export async function POST(request: Request): Promise<Response> {
         const findings = await result.object;
 
         send({ type: 'phase', phase: 'verifying' });
-        const audit = assembleAudit(findings, context);
+        const analysisUsage = normalizeUsage(await result.usage);
+
+        // La telemetria è per fase: su una scansione la trascrizione e l'analisi
+        // hanno profili di consumo opposti, e un totale unico nasconde quale
+        // delle due sta effettivamente spendendo.
+        const telemetry = buildAuditTelemetry(
+          [
+            {
+              stage: 'ingestion',
+              modelId: ingestion.modelId,
+              usage: ingestion.usage,
+              latencyMs: ingestion.latencyMs,
+            },
+            {
+              stage: 'analysis',
+              modelId,
+              usage: analysisUsage,
+              latencyMs: Date.now() - analysisStartedAt,
+            },
+          ],
+          Date.now() - startedAt,
+        );
 
         send({ type: 'phase', phase: 'scoring' });
-        const usage = normalizeUsage(await result.usage);
+        const audit = assembleAudit(
+          findings,
+          context,
+          toAuditMetadata(ingestion.summary, ingestion.security, telemetry),
+        );
 
         send({
           type: 'result',
           audit,
           metrics: {
             modelId,
-            latencyMs: Date.now() - startedAt,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            totalTokens: usage.inputTokens + usage.outputTokens,
-            costUsd: estimateCostUsd(usage, modelId),
+            latencyMs: telemetry.latencyMs,
+            inputTokens: telemetry.usage.inputTokens,
+            outputTokens: telemetry.usage.outputTokens,
+            totalTokens: telemetry.totalTokens,
+            costUsd: telemetry.costUsd,
           },
         });
         send({ type: 'phase', phase: 'done' });
