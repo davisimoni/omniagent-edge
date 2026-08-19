@@ -13,6 +13,7 @@ import {
   ShieldQuestion,
 } from 'lucide-react';
 import { RiskHeatmap, RiskScoreDial } from '@/components/audit/risk-heatmap';
+import { SpecBadge } from '@/components/dev-mode/spec-badge';
 import { Badge, type Tone } from '@/components/ui/primitives';
 import { buildExecutiveSummary } from '@/lib/audit/report';
 import {
@@ -83,11 +84,30 @@ export function AuditResult({
 
   return (
     <div data-print-root className="space-y-6">
+      {/*
+        Intestazione di stampa.
+        In pagina questi dati stanno nell'intestazione del sito e nell'angolo
+        della scheda esito; nel PDF quell'intestazione non c'è, e senza questo
+        blocco il documento comincerebbe da un cerchio con un numero dentro.
+        Un report che esce dall'azienda deve dire in prima riga di che cosa
+        parla e a quale data si riferisce.
+      */}
+      <header className="hidden border-b border-border pb-3 print:block">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+          Audit di conformità contrattuale · OmniAgent Edge
+        </p>
+        <h1 className="mt-0.5 text-xl font-semibold tracking-tight">{audit.sourceName}</h1>
+        <p className="mt-0.5 font-mono text-[10px] text-muted">
+          {audit.auditId} · generato il {new Date(audit.generatedAt).toLocaleString('it-IT')}
+        </p>
+      </header>
+
       {/* ── Esito ──────────────────────────────────────────────────────────── */}
       <section className="rounded-xl border border-border bg-surface p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <RiskScoreDial riskScore={audit.riskScore} />
           <div className="shrink-0 text-xs text-muted lg:text-right">
+            <SpecBadge id="deterministic-scoring" className="mb-1.5" />
             <p className="font-mono">{audit.auditId}</p>
             <p className="mt-0.5">{audit.sourceName}</p>
             <p className="mt-0.5">{new Date(audit.generatedAt).toLocaleString('it-IT')}</p>
@@ -170,6 +190,7 @@ export function AuditResult({
         <section>
           <SectionTitle icon={<AlertTriangle className="size-4" />}>
             Rilievi con evidenza ({audit.redFlags.length})
+            <SpecBadge id="citation-verification" />
           </SectionTitle>
           <ul className="space-y-2.5">
             {audit.redFlags.map((flag) => {
@@ -224,6 +245,7 @@ export function AuditResult({
         <section>
           <SectionTitle icon={<FileWarning className="size-4" />}>
             Clausole assenti o incomplete ({audit.missingClauses.length})
+            <SpecBadge id="clause-differencing" />
           </SectionTitle>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-xs">
@@ -268,6 +290,7 @@ export function AuditResult({
         <section>
           <SectionTitle icon={<Gauge className="size-4" />}>
             Livelli di servizio disattesi ({audit.slaViolations.length})
+            <SpecBadge id="error-budget-sla" />
           </SectionTitle>
           <ul className="space-y-2">
             {audit.slaViolations.map((violation) => (
@@ -378,7 +401,10 @@ export function AuditResult({
       {/* ── Costo ──────────────────────────────────────────────────────────── */}
       {audit.metadata.telemetry.stages.length > 0 && (
         <section>
-          <SectionTitle icon={<Coins className="size-4" />}>Costo di questa analisi</SectionTitle>
+          <SectionTitle icon={<Coins className="size-4" />}>
+            Costo di questa analisi
+            <SpecBadge id="cost-telemetry" />
+          </SectionTitle>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-xs">
               <thead className="bg-surface-raised text-left text-[11px] uppercase tracking-wide text-muted">

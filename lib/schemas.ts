@@ -162,6 +162,19 @@ export const chatRequestSchema = z.object({
 });
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
+/**
+ * Richiesta all'assistente di supporto.
+ *
+ * Il tetto è a 40 messaggi contro i 100 della chat dell'agente, e non per
+ * simmetria: la rotta ne conserva comunque solo gli ultimi venti. Validare più
+ * in alto del necessario significherebbe accettare e deserializzare un corpo
+ * che verrà scartato subito dopo — lavoro pagato per contenuto che non useremo.
+ */
+export const supportRequestSchema = z.object({
+  messages: z.array(z.unknown()).min(1).max(40),
+});
+export type SupportRequest = z.infer<typeof supportRequestSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Metadati allegati ai messaggi in streaming
 // ─────────────────────────────────────────────────────────────────────────────

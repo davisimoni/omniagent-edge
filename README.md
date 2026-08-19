@@ -24,7 +24,9 @@ Vercel AI SDK 7 · Claude Opus 5 · Zod 4 · Neon serverless (pgvector) · Vites
 | **Dashboard** | [`app/page.tsx`](app/page.tsx) | Timeline ReAct + telemetria di run, tema chiaro/scuro, mobile-first |
 | **Sicurezza** | [`lib/rate-limit.ts`](lib/rate-limit.ts) · [`middleware.ts`](middleware.ts) | Rate limiting a finestra scorrevole e difesa anti prompt injection |
 | **Ingestion** | [`lib/ingestion/`](lib/ingestion/) | Rilevamento dei PDF scansionati e ripiego su lettura visiva |
-| **Test** | [`tests/`](tests/) | 362 unit test su audit, sicurezza, ingestion, strumenti, metriche e schemi |
+| **Assistente** | [`components/ui/support-widget.tsx`](components/ui/support-widget.tsx) | OmniSupport Edge: widget flottante, ancorato alle costanti reali |
+| **Developer Mode** | [`lib/showcase/specs.ts`](lib/showcase/specs.ts) | Badge che aprono la decisione architetturale e il codice che la realizza |
+| **Test** | [`tests/`](tests/) | 409 unit test su audit, sicurezza, ingestion, contrasti WCAG e schemi |
 
 ### I sei strumenti dell'agente
 
@@ -93,6 +95,33 @@ JSON (l'oggetto `ContractAudit` integrale, validato contro il proprio schema Zod
 ### Che cosa questo motore NON è
 
 Non è uno strumento di conformità e non certifica nulla. La valutazione di adeguatezza, la decisione di firmare e la responsabilità verso le autorità di controllo restano in capo al titolare. L'avvertenza accompagna ogni audit — in interfaccia, nel JSON esportato e nel PDF — perché un rilievo generato da un modello e presentato come verdetto sposta sull'utente una responsabilità che non ha modo di valutare. Uno strumento che accelera una revisione legale è utile; uno che sembra sostituirla è un danno.
+
+---
+
+## Interfaccia
+
+### OmniSupport Edge — [`components/ui/support-widget.tsx`](components/ui/support-widget.tsx)
+
+Riquadro di supporto flottante, presente su ogni pagina, in streaming via AI SDK. Risponde su come si usa la piattaforma, che cosa controlla un audit e perché l'architettura è fatta così.
+
+**Il prompt non contiene numeri scritti a mano.** [`lib/support/knowledge.ts`](lib/support/knowledge.ts) importa `SATURATION_CONSTANT`, `VERIFIED_THRESHOLD`, il catalogo delle clausole e le quote del limitatore dai moduli che li definiscono, e li interpola. Un prompt di supporto compilato a mano è una seconda copia della documentazione, e come ogni seconda copia diverge: qualcuno cambia una soglia e per mesi l'assistente racconta quella vecchia con la stessa sicurezza. In un prodotto il cui argomento è *"il modello non produce numeri"*, un widget che sbaglia i nostri numeri smentisce la promessa mentre la spiega. Un test lo verifica costante per costante.
+
+**Nessuno strumento, e non è una semplificazione.** L'agente della dashboard ne ha sei; questo nessuno. Un widget di aiuto capace di interrogare il vector store o eseguire un audit sarebbe una seconda porta verso le stesse capacità, con un prompt più corto a difenderla — e chi scrive lì è chiunque abbia aperto la pagina. Qui si risponde su ciò che il sistema fa, non lo si fa.
+
+**Non è un modale.** Chi apre un riquadro di aiuto quasi sempre ha una domanda *su ciò che ha davanti*: un modale gli toglierebbe di vista esattamente la cosa di cui sta chiedendo. Il pannello è `aria-modal="false"`, la pagina resta navigabile, Escape chiude e il focus torna al pulsante.
+
+### Developer Mode — [`lib/showcase/specs.ts`](lib/showcase/specs.ts)
+
+Un interruttore nell'header accende badge accanto ai componenti: ognuno apre la decisione che quel componente realizza, con il perché, lo spezzone di codice e il file. Serve alla parte del pubblico che non è un utente ma qualcuno che valuta com'è costruito il software — e che senza un punto d'ingresso finisce a giudicare un prodotto di ingegneria dall'aspetto delle schede.
+
+**Nessun badge riporta una latenza inventata.** Un "Edge Runtime · 12ms" su una pagina che non ha misurato nulla è un numero decorativo, e su un'applicazione il cui argomento è *"i numeri li calcola il codice"* è il dettaglio che smonta il resto. Le metriche sono vere per costruzione — quante clausole ha il catalogo, quante parole compone una finestra di confronto, quanti round-trip costa un controllo di quota — e un test lo impone rifiutando qualunque metrica in millisecondi. I tempi reali si vedono dove vengono misurati: nel pannello metriche e nella tabella dei costi di ogni audit. Un altro test verifica che ogni percorso di file citato **esista davvero**: un badge che rimanda a un file inesistente fa più danno del badge assente.
+
+### Accessibilità
+
+- I modali usano l'elemento **`<dialog>` nativo** con `showModal()`: focus trap, Escape, inertizzazione e ritorno del focus vengono dal browser. Riscriverli è un esercizio noto per riuscire male.
+- Le voci apribili usano **`<details>`**: navigabili da tastiera, con contenuto trovabile dalla ricerca del browser anche da chiuse.
+- **I contrasti sono calcolati, non scelti a occhio.** [`tests/contrast.test.ts`](tests/contrast.test.ts) legge i token OKLCH direttamente da `globals.css`, li converte in luminanza relativa e impone 4,5:1 su ogni superficie in entrambi i temi. La verifica ha trovato due difetti reali: in tema chiaro `success` era a 4,21:1 e `warning` a 3,08:1 — sotto soglia proprio sulle etichette "Basso" e "Medio", cioè sull'informazione per cui l'interfaccia esiste. Le lightness ora sono le minime che raggiungono la soglia.
+- Il colore non è mai l'unico veicolo: la heatmap riporta punteggio in cifre e fascia in parole, perché una mappa che comunica solo col colore scompare nella stampa in bianco e nero — cioè nel formato in cui un report di audit circola più spesso.
 
 ---
 
@@ -216,6 +245,7 @@ Gli embedding del corpus sono memoizzati per identità dell'array, così il cost
 middleware.ts             Rate limiting di bordo su /api, prima che il corpo venga letto
 app/
   api/audit/route.ts      Audit in streaming NDJSON, con avanzamento reale (Edge)
+  api/support/route.ts    Assistente di supporto in streaming, senza strumenti (Edge)
   api/chat/route.ts       Agente ReAct in streaming (Edge)
   api/extract/route.ts    Estrazione strutturata sincrona (Edge)
   api/health/route.ts     Diagnostica di configurazione
@@ -223,6 +253,11 @@ app/
   audit/page.tsx          Banco di lavoro dell'audit
   extractor/page.tsx      Banco di lavoro dell'estrattore
 components/
+  ui/support-widget.tsx   Riquadro di supporto flottante, non modale
+  ui/dialog.tsx           Modale su <dialog> nativo: focus trap e Escape dal browser
+  dev-mode/               Provider, badge di architettura e vetrina dello stack
+  audit/audit-onboarding.tsx  Guida in tre passi, congedabile e riapribile
+  audit/audit-skeleton.tsx    Scheletro del risultato durante l'analisi
   audit-workbench.tsx     Caricamento, metriche osservate, esportazione
   audit/audit-progress.tsx  Barra di avanzamento alimentata dal server
   audit/risk-heatmap.tsx    Mappa di calore per area + indicatore complessivo
@@ -232,6 +267,9 @@ components/
   metrics-panel.tsx       Latenza, token, costo, step
   extractor-workbench.tsx Drag-and-drop, tabella entità, esportazione JSON
 lib/
+  support/knowledge.ts    Prompt dell'assistente generato dalle costanti reali
+  support/quick-prompts.ts  Etichette senza dipendenze, per il bundle client
+  showcase/specs.ts       Catalogo delle decisioni mostrate in Developer Mode
   rate-limit.ts           Finestra scorrevole, Upstash via REST, ripiego in memoria
   security/prompt-injection.ts  Sanitizzazione e rilevamento nei documenti non fidati
   ingestion/assess.ts     Rileva i PDF scansionati prima che l'audit giri sul vuoto (puro)
@@ -256,7 +294,7 @@ lib/
   vector.ts               Edge RAG: embedding, RRF, ricerca ibrida
   schemas.ts              Contratti Zod condivisi
   metrics.ts              Token, costo, latenza (puro)
-tests/                    362 unit test
+tests/                    409 unit test
 db/schema.sql             pgvector + full-text + indici
 scripts/ingest.ts         Popolamento del vector store
 ```

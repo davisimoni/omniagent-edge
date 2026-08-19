@@ -1,5 +1,6 @@
 import { Hexagon } from 'lucide-react';
 import Link from 'next/link';
+import { ArchitectureButton } from '@/components/dev-mode/architecture-dialog';
 import { NavLinks } from '@/components/nav-links';
 import { ThemeToggle } from '@/components/theme-toggle';
 
@@ -32,6 +33,7 @@ export function SiteHeader() {
             <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
             Edge · fra1
           </span>
+          <ArchitectureButton />
           <ThemeToggle />
         </div>
       </div>

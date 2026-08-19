@@ -22,8 +22,19 @@
     --accent: oklch(0.53 0.22 285);
     --accent-foreground: oklch(0.99 0 0);
     --accent-soft: oklch(0.95 0.03 285);
-    --success: oklch(0.55 0.14 155);
-    --warning: oklch(0.65 0.15 75);
+    /*
+     * Le lightness di `success` e `warning` sono calcolate, non scelte a occhio.
+     *
+     * Questi due colori portano le etichette di rischio "Basso" e "Medio" a
+     * corpo 11px, cioè testo normale ai fini WCAG, per il quale la soglia è
+     * 4,5:1. Ai valori di partenza — 0.55 e 0.65 — il contrasto sulle superfici
+     * chiare era 4,21:1 e 3,08:1: sotto soglia proprio sull'informazione che
+     * l'interfaccia esiste per comunicare. 0.53 e 0.555 sono le lightness
+     * minime che raggiungono 4,5:1 su background, surface e surface-raised.
+     * In tema scuro i valori originali superano già 7:1 e restano invariati.
+     */
+    --success: oklch(0.53 0.14 155);
+    --warning: oklch(0.555 0.15 75);
     --danger: oklch(0.55 0.2 25);
     --ring: oklch(0.53 0.22 285 / 0.45);
   }
@@ -193,6 +204,46 @@
   }
 }
 
+/*
+ * Micro-interazioni di apertura.
+ *
+ * Corte e con traslazioni minime: un pannello che entra da lontano con mezzo
+ * secondo di durata è gradevole la prima volta e un ostacolo la ventesima, e chi
+ * usa questo strumento lo apre molte volte al giorno. La regola
+ * `prefers-reduced-motion` più in alto le azzera entrambe.
+ */
+@keyframes omni-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes omni-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scheletro di caricamento: il luccichio scorre, l'opacità non lampeggia. */
+@keyframes omni-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 @keyframes omni-pulse {
   0%,
   100% {
@@ -205,4 +256,39 @@
 
 .animate-omni-pulse {
   animation: omni-pulse 1.4s ease-in-out infinite;
+}
+
+.animate-omni-dialog-in {
+  animation: omni-dialog-in 160ms ease-out;
+}
+
+.animate-omni-panel-in {
+  animation: omni-panel-in 180ms ease-out;
+}
+
+/*
+ * Scheletro di caricamento.
+ *
+ * Il luccichio scorre lungo un gradiente invece di far pulsare l'opacità del
+ * blocco: una superficie che lampeggia attira l'occhio e comunica "errore",
+ * mentre un movimento in una direzione sola comunica "in arrivo", che è il
+ * messaggio giusto mentre si attende un risultato.
+ */
+.omni-skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--surface-raised) 25%,
+    var(--border) 50%,
+    var(--surface-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: omni-shimmer 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omni-skeleton {
+    animation: none;
+    background-image: none;
+    background-color: var(--surface-raised);
+  }
 }

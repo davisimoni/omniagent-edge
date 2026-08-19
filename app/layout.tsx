@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { DevModeProvider } from '@/components/dev-mode/dev-mode-provider';
 import { SiteHeader } from '@/components/site-header';
+import { SupportWidget } from '@/components/ui/support-widget';
 import './globals.css';
 
 const inter = Inter({
@@ -72,12 +74,20 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           Vai al contenuto
         </a>
-        <div className="flex min-h-dvh flex-col">
-          <SiteHeader />
-          <main id="contenuto" className="flex-1">
-            {children}
-          </main>
-        </div>
+        {/* Il provider avvolge tutto: i badge di Developer Mode stanno accanto ai
+            componenti che spiegano, quindi lo stato deve essere leggibile da
+            qualunque punto dell'albero. */}
+        <DevModeProvider>
+          <div className="flex min-h-dvh flex-col">
+            <SiteHeader />
+            <main id="contenuto" className="flex-1">
+              {children}
+            </main>
+          </div>
+          {/* Fuori dal <main>: e' un accessorio persistente, non contenuto della
+              pagina, e resta montato attraverso le navigazioni client. */}
+          <SupportWidget />
+        </DevModeProvider>
       </body>
     </html>
   );

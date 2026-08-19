@@ -1,6 +1,7 @@
 import { CircleAlert, ShieldCheck } from 'lucide-react';
 import type { Metadata } from 'next';
 import { AuditWorkbench } from '@/components/audit-workbench';
+import { SpecBadge } from '@/components/dev-mode/spec-badge';
 import { Badge } from '@/components/ui/primitives';
 import { getModelId, hasModelCredentials } from '@/lib/ai/model';
 import { CLAUSE_CATALOG } from '@/lib/audit/clauses';
@@ -37,6 +38,8 @@ export default function AuditPage() {
             {modelReady ? getModelId() : 'chiave modello assente'}
           </Badge>
           <Badge tone="accent">{CLAUSE_CATALOG.length} clausole nel catalogo</Badge>
+          <SpecBadge id="edge-runtime" />
+          <SpecBadge id="prompt-injection" />
         </div>
       </div>
 

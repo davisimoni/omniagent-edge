@@ -15,8 +15,11 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useId, useRef, useState, type DragEvent } from 'react';
+import { AuditOnboarding } from '@/components/audit/audit-onboarding';
 import { AuditProgress, type AuditProgressState } from '@/components/audit/audit-progress';
+import { AuditSkeleton } from '@/components/audit/audit-skeleton';
 import { AuditResult } from '@/components/audit/audit-result';
+import { SpecBadge } from '@/components/dev-mode/spec-badge';
 import { Badge, Button, Card, CardHeader, EmptyState } from '@/components/ui/primitives';
 import { CLAUSE_CATALOG } from '@/lib/audit/clauses';
 import { buildExecutiveReport } from '@/lib/audit/report';
@@ -279,11 +282,19 @@ export function AuditWorkbench() {
   };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[24rem_minmax(0,1fr)]">
+    <div className="space-y-4">
+      <AuditOnboarding onLoadSample={loadSample} />
+
+      <div className="grid gap-4 xl:grid-cols-[24rem_minmax(0,1fr)]">
       {/* ── Ingresso ───────────────────────────────────────────────────────── */}
       <Card className="flex flex-col print:hidden xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)]">
         <CardHeader
-          title="Documento da sottoporre ad audit"
+          title={
+            <span className="flex flex-wrap items-center gap-1.5">
+              Documento da sottoporre ad audit
+              <SpecBadge id="ocr-fallback" />
+            </span>
+          }
           description="Contratto, SLA o DPA. Il testo incollato permette di verificare le citazioni."
           action={
             <Button variant="ghost" onClick={reset} disabled={busy} className="px-2 py-1 text-xs">
@@ -515,7 +526,14 @@ export function AuditWorkbench() {
 
       {/* ── Risultato ──────────────────────────────────────────────────────── */}
       <div className="space-y-4">
-        {busy && progress !== null && <AuditProgress state={progress} />}
+        {busy && progress !== null && (
+          <div>
+            <div className="mb-1.5 flex justify-end">
+              <SpecBadge id="ndjson-streaming" />
+            </div>
+            <AuditProgress state={progress} />
+          </div>
+        )}
 
         {audit !== null && (
           <div className="flex flex-wrap items-center gap-1.5 print:hidden">
@@ -546,7 +564,14 @@ export function AuditWorkbench() {
           </div>
         )}
 
-        {audit === null && !busy ? (
+        {audit !== null ? (
+          <AuditResult audit={audit} metrics={metrics} />
+        ) : busy ? (
+          // Lo scheletro mostra la forma di ciò che arriverà: sotto la barra,
+          // il vuoto è l'unica parte dell'attesa che si può riempire di
+          // informazione utile a chi non ha mai visto un risultato.
+          <AuditSkeleton />
+        ) : (
           <Card className="print:hidden">
             <EmptyState
               icon={<ShieldCheck className="size-5" />}
@@ -554,9 +579,8 @@ export function AuditWorkbench() {
               description="Carica un contratto o usa quello di esempio. L'analisi valuta una per una le clausole del catalogo, cita il testo a supporto di ogni rilievo e calcola il punteggio di rischio in modo deterministico."
             />
           </Card>
-        ) : audit !== null ? (
-          <AuditResult audit={audit} metrics={metrics} />
-        ) : null}
+        )}
+        </div>
       </div>
     </div>
   );

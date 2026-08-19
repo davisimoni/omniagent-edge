@@ -1,5 +1,6 @@
 import { CircleAlert, Database, KeyRound, Sparkles } from 'lucide-react';
 import { AgentConsole } from '@/components/agent-console';
+import { SpecBadge } from '@/components/dev-mode/spec-badge';
 import { Badge } from '@/components/ui/primitives';
 import { getEffort, getMaxSteps, getModelId, hasModelCredentials } from '@/lib/ai/model';
 import { readEnv } from '@/lib/env';
@@ -47,6 +48,9 @@ export default function DashboardPage() {
             <Sparkles className="size-3" aria-hidden="true" />
             effort {getEffort()} · max {getMaxSteps()} step
           </Badge>
+          <SpecBadge id="edge-runtime" />
+          <SpecBadge id="typed-tools" />
+          <SpecBadge id="hybrid-rag" />
         </div>
       </div>
 

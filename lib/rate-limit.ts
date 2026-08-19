@@ -41,6 +41,11 @@ export const RATE_LIMIT_POLICIES = {
   audit: { name: 'audit', limit: 10, windowMs: 60_000 },
   chat: { name: 'chat', limit: 30, windowMs: 60_000 },
   extract: { name: 'extract', limit: 20, windowMs: 60_000 },
+  // Il supporto è la rotta più esposta — il riquadro è aperto su ogni pagina e
+  // non richiede alcuna azione preliminare — ma anche la meno costosa per
+  // chiamata, con un tetto di output basso e nessuno strumento. Quota alta per
+  // non ostacolare una conversazione vera, e comunque un tetto.
+  support: { name: 'support', limit: 40, windowMs: 60_000 },
   default: { name: 'default', limit: 60, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
@@ -455,5 +460,6 @@ export function policyForPath(pathname: string): RateLimitPolicy | null {
   if (pathname.startsWith('/api/audit')) return RATE_LIMIT_POLICIES.audit;
   if (pathname.startsWith('/api/chat')) return RATE_LIMIT_POLICIES.chat;
   if (pathname.startsWith('/api/extract')) return RATE_LIMIT_POLICIES.extract;
+  if (pathname.startsWith('/api/support')) return RATE_LIMIT_POLICIES.support;
   return RATE_LIMIT_POLICIES.default;
 }
