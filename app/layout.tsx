@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { DevModeProvider } from '@/components/dev-mode/dev-mode-provider';
 import { SiteFooter } from '@/components/site-footer';
@@ -7,17 +6,15 @@ import { SiteHeader } from '@/components/site-header';
 import { SupportWidget } from '@/components/ui/support-widget';
 import './globals.css';
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-mono-code',
-  display: 'swap',
-});
+/*
+ * Nessun `next/font/google` qui, ed è deliberato.
+ *
+ * Quell'import scarica i file dei caratteri a ogni compilazione con cache
+ * vuota: la disponibilità di Google diventa una condizione per il deploy, e
+ * durante lo sviluppo di questo progetto ha fatto fallire il build tre volte
+ * senza che una riga di codice fosse in causa. Gli elenchi di caratteri di
+ * sistema vivono ora in `app/globals.css`.
+ */
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://omniagent-edge.vercel.app';
 const DESCRIPTION =
@@ -111,7 +108,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className={`${inter.variable} ${jetbrainsMono.variable} min-h-dvh antialiased`}>
+      <body className="min-h-dvh antialiased">
         {/* Il salto al contenuto è la prima tabulazione utile per chi naviga da tastiera. */}
         <a
           href="#contenuto"

@@ -94,8 +94,40 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-mono-code), ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+  /*
+   * Tipografia di sistema, senza webfont.
+   *
+   * **Perché il build non deve dipendere da Google Fonts.** `next/font/google`
+   * scarica i file a ogni compilazione con cache vuota: un disservizio di
+   * Google, o semplicemente una rete assente, trasformano un deploy in un
+   * fallimento per una ragione che non ha nulla a che vedere con il codice. È
+   * successo tre volte durante lo sviluppo di questo progetto.
+   *
+   * Il guadagno non è solo di robustezza. Un carattere di sistema è già in
+   * memoria: zero byte scaricati, nessun lampo di testo non stilizzato, nessuno
+   * spostamento del layout quando il webfont sostituisce il ripiego. Su una
+   * dashboard che si apre molte volte al giorno è la differenza che si nota.
+   *
+   * **Nessun riferimento a variabili definite altrove.** La versione precedente
+   * apriva con `var(--font-inter)`: se quella variabile non esiste, l'intera
+   * dichiarazione diventa invalida — non ricade sul secondo elemento
+   * dell'elenco — e `font-family` perde ogni valore. Togliere l'import senza
+   * togliere anche il riferimento avrebbe rotto la tipografia ovunque.
+   *
+   * Per tornare a un carattere proprio: scarica i `.woff2` (Inter e JetBrains
+   * Mono, entrambi SIL OFL), mettili in `app/fonts/`, dichiarali con
+   * `next/font/local` e anteponi la variabile a questi elenchi. Il build
+   * resterebbe senza rete perché i file sarebbero nel repository.
+   */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text',
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    /* In coda, così le emoji restano a colori invece di ricadere su un glifo
+       monocromatico del carattere di testo. */
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'Liberation Mono',
+    'Roboto Mono', 'Courier New', monospace;
 }
 
 @layer base {

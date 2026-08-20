@@ -103,6 +103,18 @@ Non è uno strumento di conformità e non certifica nulla. La valutazione di ade
 
 ---
 
+## Tipografia
+
+**Nessun webfont, e nessuna dipendenza di rete nel build.** `next/font/google` scarica i file dei caratteri a ogni compilazione con cache vuota: la disponibilità di Google diventa una condizione per il deploy, e durante lo sviluppo di questo progetto ha fatto fallire il build tre volte senza che una riga di codice fosse in causa. Gli elenchi vivono in [`app/globals.css`](app/globals.css) e partono da `ui-sans-serif` / `ui-monospace`, i generici che ogni piattaforma risolve sul proprio carattere di interfaccia.
+
+Il guadagno non è solo di robustezza: un carattere di sistema è già in memoria, quindi zero byte scaricati, nessun lampo di testo non stilizzato e nessuno spostamento del layout quando il webfont sostituirebbe il ripiego.
+
+Una trappola evitata: la versione precedente apriva l'elenco con `var(--font-inter)`. Se quella variabile non esiste, l'intera dichiarazione diventa invalida — **non** ricade sul secondo elemento — e `font-family` perde ogni valore. Togliere l'import senza togliere il riferimento avrebbe rotto la tipografia ovunque.
+
+Per tornare a un carattere proprio: scarica i `.woff2` di Inter e JetBrains Mono (entrambi SIL OFL), mettili in `app/fonts/`, dichiarali con `next/font/local` e anteponi la variabile agli elenchi. Il build resterebbe senza rete, perché i file sarebbero versionati nel repository.
+
+---
+
 ## Marchio
 
 Il simbolo è uno **scudo a spalle angolari** — sicurezza con la geometria di un nodo di rete, non l'araldica di un lucchetto — con dentro un segno di spunta che termina su un nodo pieno: la verifica che si chiude in un punto certo. Riassume ciò che il prodotto fa: un audit che difende, eseguito all'estremità della rete, che finisce in un rilievo verificato.
