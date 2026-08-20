@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   DiagnosticsPanel,
+  InvitePanel,
+  ManageSubscriptionLink,
   NotificationsPanel,
   ProfilePanel,
   SignOutButton,
@@ -14,6 +16,7 @@ import { listMembers } from '@/lib/auth/repository';
 import { getPlan, hasFeature } from '@/lib/billing/plans';
 import { getUsageSummary } from '@/lib/billing/quota';
 import { getNotificationSettings } from '@/lib/notifications/dispatch';
+import { countSeats, listInvitations } from '@/lib/auth/invitations';
 import { formatCostUsd } from '@/lib/metrics';
 
 export const metadata: Metadata = {
@@ -37,10 +40,12 @@ export default async function SettingsPage() {
   const account = await getCurrentAccount();
   if (account === null) redirect('/login');
 
-  const [members, usage, notifications] = await Promise.all([
+  const [members, usage, notifications, invitations, seats] = await Promise.all([
     listMembers(account.organization.id),
     getUsageSummary(account.organization.id),
     getNotificationSettings(account.organization.id),
+    listInvitations(account.organization.id),
+    countSeats(account.organization.id, account.organization.plan),
   ]);
 
   const plan = getPlan(account.organization.plan);
@@ -94,6 +99,12 @@ export default async function SettingsPage() {
               </Badge>
             </p>
           )}
+
+          <div className="mb-3">
+            <ManageSubscriptionLink
+              hasCustomer={account.organization.stripeCustomerId !== null}
+            />
+          </div>
 
           {plan.id === 'free' && (
             <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3">
@@ -154,11 +165,15 @@ export default async function SettingsPage() {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] leading-relaxed text-muted">
-            L&apos;invito di nuovi membri via email non è ancora attivo: lo schema è pronto
-            (tabella <code className="font-mono">invitations</code>, con token conservato come
-            digest) e richiede un fornitore di posta configurato.
-          </p>
+          <div className="mt-3 border-t border-border pt-3">
+            <InvitePanel
+              invites={invitations}
+              seatsUsed={seats.used}
+              seatsLimit={seats.limit}
+              canInvite={isAdmin}
+              planName={plan.name}
+            />
+          </div>
         </Section>
 
         {/* ── Diagnostica ──────────────────────────────────────────────────── */}

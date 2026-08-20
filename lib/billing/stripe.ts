@@ -124,6 +124,51 @@ export async function createCheckoutSession(input: CheckoutInput): Promise<Check
   return { id: payload.id, url: payload.url };
 }
 
+/**
+ * Sessione del portale clienti.
+ *
+ * **Perché il portale ospitato invece di schermate nostre.** Cambiare metodo di
+ * pagamento, scaricare una fattura e disdire sono tre flussi con requisiti
+ * fiscali e normativi che cambiano per giurisdizione: ricostruirli significa
+ * mantenere un secondo prodotto, e sbagliarli significa che qualcuno non riesce
+ * a disdire — che è il modo più rapido di trasformare un cliente in una
+ * contestazione con l'emittente della carta.
+ *
+ * Richiede un `stripe_customer_id`: esiste solo dopo il primo pagamento andato a
+ * buon fine, quindi il chiamante deve gestire il caso in cui manchi invece di
+ * mostrare un pulsante che porta a un errore.
+ */
+export async function createPortalSession(input: {
+  customerId: string;
+  returnUrl: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ url: string }> {
+  const secretKey = readEnv('STRIPE_SECRET_KEY');
+  if (secretKey === undefined) throw new StripeNotConfiguredError('STRIPE_SECRET_KEY');
+
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const response = await fetchImpl(`${STRIPE_API}/billing_portal/sessions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${secretKey}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ customer: input.customerId, return_url: input.returnUrl }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    console.error('[stripe] portale clienti non creato', response.status, detail.slice(0, 500));
+    throw new Error(`Stripe ha risposto ${response.status} alla creazione del portale.`);
+  }
+
+  const payload = (await response.json()) as { url?: string };
+  if (typeof payload.url !== 'string') {
+    throw new Error('Stripe non ha restituito un URL per il portale clienti.');
+  }
+  return { url: payload.url };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Webhook
 // ─────────────────────────────────────────────────────────────────────────────

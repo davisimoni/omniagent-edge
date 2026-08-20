@@ -1,5 +1,6 @@
 import { ShieldCheck } from 'lucide-react';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AuthForm } from '@/components/auth/auth-form';
 import { authUnavailableReason, getCurrentAccount, isAuthAvailable } from '@/lib/auth/current-user';
@@ -30,6 +31,17 @@ export default async function LoginPage() {
       </div>
 
       <AuthForm mode="login" disabled={!isAuthAvailable()} disabledReason={authUnavailableReason()} />
+
+      {isAuthAvailable() && (
+        <p className="mt-3 text-center text-xs text-muted">
+          <Link
+            href="/forgot-password"
+            className="underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >
+            Password dimenticata?
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

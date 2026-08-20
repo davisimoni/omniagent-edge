@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Favicon: stessa geometria di components/ui/logo.tsx, con i colori scritti a
+    mano invece che presi dalle variabili del tema. Un favicon è servito come
+    file statico, fuori dal documento: `var(--logo-from)` lì non risolve nulla e
+    il marchio uscirebbe nero. I valori sono quelli del tema chiaro, che restano
+    leggibili anche sulle barre schede scure perché il gradiente è saturo.
+  -->
+  <defs>
+    <linearGradient id="omni-mark" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4f46e5"/>
+      <stop offset="0.52" stop-color="#0ea5e9"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="omni-bevel" x1="8" y1="3" x2="20" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M16 1.8 27.8 8.1V17c0 6.9-5.2 11.8-11.8 13.9C9.4 28.8 4.2 23.9 4.2 17V8.1L16 1.8Z" fill="url(#omni-mark)"/>
+  <path d="M16 1.8 27.8 8.1 16 14.4 4.2 8.1 16 1.8Z" fill="url(#omni-bevel)"/>
+  <path d="M10.6 16.4 14.4 20.2 21.6 12.6" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="21.6" cy="12.6" r="2" fill="#ffffff"/>
+</svg>

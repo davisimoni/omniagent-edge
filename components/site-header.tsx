@@ -1,9 +1,9 @@
-import { Hexagon } from 'lucide-react';
 import Link from 'next/link';
 import { AccountMenu } from '@/components/account-menu';
 import { ArchitectureButton } from '@/components/dev-mode/architecture-dialog';
 import { NavLinks } from '@/components/nav-links';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Logo } from '@/components/ui/logo';
 import { getCurrentAccount, isAuthAvailable } from '@/lib/auth/current-user';
 
 /**
@@ -25,10 +25,11 @@ export async function SiteHeader() {
           className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
           aria-label="OmniAgent Edge — vai alla dashboard"
         >
-          <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-foreground">
-            <Hexagon className="size-4" aria-hidden="true" />
-          </span>
-          <span className="hidden sm:inline">OmniAgent Edge</span>
+          {/* Su schermo stretto resta il solo simbolo: il marchio completo
+              occuperebbe metà della barra, e sotto c'è una navigazione che
+              scorre già di suo. */}
+          <Logo variant="icon" size={28} className="sm:hidden" />
+          <Logo size={28} className="hidden sm:inline-flex" />
         </Link>
 
         <NavLinks authenticated={account !== null} />

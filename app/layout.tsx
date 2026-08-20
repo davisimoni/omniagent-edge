@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { DevModeProvider } from '@/components/dev-mode/dev-mode-provider';
+import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { SupportWidget } from '@/components/ui/support-widget';
 import './globals.css';
@@ -18,15 +19,59 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://omniagent-edge.vercel.app';
+const DESCRIPTION =
+  'Audit automatico dei contratti fornitori: rilievi GDPR e ISO 27001, penali, recesso e ' +
+  'scostamenti di SLA, ciascuno con la citazione del passaggio che lo genera.';
+
+/**
+ * Metadati.
+ *
+ * `metadataBase` è obbligatorio perché OpenGraph vuole URL assoluti: senza,
+ * Next emette percorsi relativi che i crawler non risolvono, e l'anteprima
+ * condivisa resta vuota proprio dove serve — in un messaggio Slack o LinkedIn,
+ * cioè nel modo in cui questo prodotto viene davvero mostrato a qualcuno.
+ *
+ * L'indicizzazione è ora attiva: `noindex` aveva senso finché non esistevano
+ * pagine pubbliche, e oggi listino, informativa e condizioni sono esattamente le
+ * pagine che devono essere trovabili.
+ */
 export const metadata: Metadata = {
+  metadataBase: new URL(APP_URL),
   title: {
-    default: 'OmniAgent Edge',
+    default: 'OmniAgent Edge — audit dei contratti fornitori',
     template: '%s · OmniAgent Edge',
   },
-  description:
-    'Piattaforma di agenti AI su Vercel Edge: ciclo ReAct osservabile, RAG ibrido su pgvector ed estrazione di dati strutturati validati.',
+  description: DESCRIPTION,
   applicationName: 'OmniAgent Edge',
-  robots: { index: false, follow: false },
+  keywords: [
+    'audit contratti',
+    'conformità fornitori',
+    'GDPR art. 28',
+    'ISO 27001',
+    'violazioni SLA',
+    'contract risk',
+    'vendor compliance',
+  ],
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    siteName: 'OmniAgent Edge',
+    locale: 'it_IT',
+    url: APP_URL,
+    title: 'OmniAgent Edge — audit dei contratti fornitori',
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'OmniAgent Edge — audit dei contratti fornitori',
+    description: DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, 'max-image-preview': 'large' },
+  },
 };
 
 export const viewport: Viewport = {
@@ -83,6 +128,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <main id="contenuto" className="flex-1">
               {children}
             </main>
+            <SiteFooter />
           </div>
           {/* Fuori dal <main>: e' un accessorio persistente, non contenuto della
               pagina, e resta montato attraverso le navigazioni client. */}

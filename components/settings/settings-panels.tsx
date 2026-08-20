@@ -1,6 +1,16 @@
 'use client';
 
-import { Activity, AlertCircle, Check, Loader2, LogOut, Lock } from 'lucide-react';
+import {
+  Activity,
+  AlertCircle,
+  Check,
+  CreditCard,
+  Loader2,
+  Lock,
+  LogOut,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useId, useState } from 'react';
@@ -459,5 +469,226 @@ export function SignOutButton() {
       <LogOut className="size-3.5" aria-hidden="true" />
       Esci
     </Button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PendingInvite {
+  readonly id: string;
+  readonly email: string;
+  readonly role: string;
+  readonly expiresAt: string;
+}
+
+/**
+ * Invito di colleghi.
+ *
+ * Le postazioni occupate contano **anche gli inviti aperti**, ed è ciò che il
+ * contatore mostra. Senza, qualcuno genererebbe cinque inviti su un piano da
+ * cinque posti e scoprirebbe il limite solo quando la quinta persona non riesce
+ * a entrare — cioè addossando a lei l'errore di chi l'ha invitata.
+ */
+export function InvitePanel({
+  invites,
+  seatsUsed,
+  seatsLimit,
+  canInvite,
+  planName,
+}: {
+  invites: readonly PendingInvite[];
+  seatsUsed: number;
+  seatsLimit: number | null;
+  canInvite: boolean;
+  planName: string;
+}) {
+  const router = useRouter();
+  const emailId = useId();
+  const roleId = useId();
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('member');
+  const [devLink, setDevLink] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const { save, busy, error, saved } = useSaver();
+
+  const full = seatsLimit !== null && seatsUsed >= seatsLimit;
+
+  const submit = async (): Promise<void> => {
+    setDevLink(null);
+    setInviteError(null);
+    try {
+      const response = await fetch('/api/team/invite', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, role }),
+      });
+      const payload = (await response.json()) as {
+        message?: string;
+        link?: string | null;
+        emailDelivered?: boolean;
+      };
+
+      if (!response.ok) {
+        setInviteError(payload.message ?? 'Invito non riuscito.');
+        return;
+      }
+
+      setEmail('');
+      if (payload.emailDelivered !== true && typeof payload.link === 'string') {
+        // Nessun fornitore di posta: il link va consegnato a mano, altrimenti
+        // l'invito esiste e non raggiunge nessuno.
+        setDevLink(payload.link);
+      }
+      router.refresh();
+    } catch {
+      setInviteError('Impossibile contattare il server.');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        {seatsLimit === null
+          ? `${seatsUsed} postazioni occupate · piano ${planName}, senza limite`
+          : `${seatsUsed} di ${seatsLimit} postazioni occupate, inviti aperti inclusi · piano ${planName}`}
+      </p>
+
+      {!canInvite ? (
+        <p className="rounded-lg border border-border bg-surface-raised p-3 text-xs leading-relaxed text-muted">
+          Solo chi amministra il workspace può invitare nuove persone.
+        </p>
+      ) : full ? (
+        <div className="rounded-lg border border-accent/30 bg-accent-soft/50 p-3">
+          <p className="text-xs leading-relaxed">
+            Tutte le postazioni del piano {planName} sono occupate. Revoca un invito aperto per
+            liberarne una, oppure passa a un piano con più posti.
+          </p>
+          <Link
+            href="/pricing"
+            className="mt-2 inline-flex text-xs font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Vedi i piani
+          </Link>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5 sm:flex-row">
+          <div className="min-w-0 flex-1">
+            <label htmlFor={emailId} className="sr-only">
+              Email della persona da invitare
+            </label>
+            <input
+              id={emailId}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="collega@azienda.it"
+              className="w-full rounded-lg border border-border bg-background px-2.5 py-2 text-xs placeholder:text-muted"
+            />
+          </div>
+          <label htmlFor={roleId} className="sr-only">
+            Ruolo
+          </label>
+          <select
+            id={roleId}
+            value={role}
+            onChange={(event) => setRole(event.target.value)}
+            className="rounded-lg border border-border bg-background px-2.5 py-2 text-xs"
+          >
+            <option value="member">Membro</option>
+            <option value="admin">Amministratore</option>
+          </select>
+          <Button
+            onClick={() => void submit()}
+            disabled={email.trim().length === 0}
+            className="shrink-0 px-3 py-2 text-xs"
+          >
+            <UserPlus className="size-3.5" aria-hidden="true" />
+            Invita
+          </Button>
+        </div>
+      )}
+
+      {inviteError !== null && (
+        <p role="alert" className="text-[11px] leading-relaxed text-danger">
+          {inviteError}
+        </p>
+      )}
+
+      {devLink !== null && (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-2.5">
+          <p className="text-[11px] font-medium text-warning">
+            Email non inviata: nessun fornitore di posta configurato
+          </p>
+          <p className="mt-1 break-all font-mono text-[10px] text-warning/90">{devLink}</p>
+          <p className="mt-1 text-[11px] text-warning/90">
+            Consegna tu questo link alla persona invitata.
+          </p>
+        </div>
+      )}
+
+      {invites.length > 0 && (
+        <ul className="space-y-1.5">
+          {invites.map((invite) => (
+            <li
+              key={invite.id}
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-surface-raised px-2.5 py-2 text-xs"
+            >
+              <span className="min-w-0 flex-1 truncate">{invite.email}</span>
+              <Badge>{invite.role}</Badge>
+              <Badge tone="warning">in attesa</Badge>
+              <span className="text-[11px] text-muted">
+                scade il {new Date(invite.expiresAt).toLocaleDateString('it-IT')}
+              </span>
+              {canInvite && (
+                <button
+                  type="button"
+                  onClick={() => void save('/api/team/invite', { invitationId: invite.id })}
+                  disabled={busy}
+                  className="rounded p-1 text-muted transition-colors hover:bg-surface hover:text-danger"
+                  aria-label={`Revoca l'invito per ${invite.email}`}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Status busy={busy} error={error} saved={saved} />
+    </div>
+  );
+}
+
+/**
+ * Gestione dell'abbonamento.
+ *
+ * Un collegamento al portale ospitato, non un modulo nostro: metodo di
+ * pagamento, fatture e disdetta sono flussi con requisiti fiscali che cambiano
+ * per giurisdizione, e ricostruirli significa mantenere un secondo prodotto.
+ */
+export function ManageSubscriptionLink({ hasCustomer }: { hasCustomer: boolean }) {
+  if (!hasCustomer) {
+    return (
+      <p className="text-xs leading-relaxed text-muted">
+        Non risultano pagamenti su questo workspace: non c&apos;è ancora un abbonamento da gestire.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <a
+        href="/api/billing/portal"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium transition-colors hover:bg-surface-raised"
+      >
+        <CreditCard className="size-3.5" aria-hidden="true" />
+        Gestisci abbonamento e fatture
+      </a>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+        Si apre il portale sicuro di Stripe: da lì cambi il metodo di pagamento, scarichi le
+        fatture e disdici. Nessun dato di carta passa dai nostri sistemi.
+      </p>
+    </div>
   );
 }

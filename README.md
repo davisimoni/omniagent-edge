@@ -29,7 +29,9 @@ Vercel AI SDK 7 · Claude Opus 5 · Zod 4 · Neon serverless (pgvector) · Vites
 | **Workspace** | [`app/history/`](app/history/) · [`lib/audits/`](lib/audits/) | Account, cronologia degli audit, confronto fra versioni, revisione umana |
 | **Monetizzazione** | [`lib/billing/`](lib/billing/) · [`app/pricing/`](app/pricing/) | Piani, quote per periodo, Stripe Checkout e webhook firmato |
 | **Diagnostica** | [`app/api/health/deep/`](app/api/health/deep/) | Latenze reali verso PostgreSQL, Redis e API del modello |
-| **Test** | [`tests/`](tests/) | 508 unit e integration test, contrasti WCAG inclusi |
+| **Marchio** | [`components/ui/logo.tsx`](components/ui/logo.tsx) | Logo SVG con gradiente legato al tema, favicon e immagine OpenGraph |
+| **Legale e SEO** | [`app/privacy/`](app/privacy/) · [`app/terms/`](app/terms/) | Informativa, condizioni, indicizzazione e anteprime social |
+| **Test** | [`tests/`](tests/) | 534 unit e integration test, contrasti WCAG inclusi |
 
 ### I sei strumenti dell'agente
 
@@ -98,6 +100,19 @@ JSON (l'oggetto `ContractAudit` integrale, validato contro il proprio schema Zod
 ### Che cosa questo motore NON è
 
 Non è uno strumento di conformità e non certifica nulla. La valutazione di adeguatezza, la decisione di firmare e la responsabilità verso le autorità di controllo restano in capo al titolare. L'avvertenza accompagna ogni audit — in interfaccia, nel JSON esportato e nel PDF — perché un rilievo generato da un modello e presentato come verdetto sposta sull'utente una responsabilità che non ha modo di valutare. Uno strumento che accelera una revisione legale è utile; uno che sembra sostituirla è un danno.
+
+---
+
+## Marchio
+
+Il simbolo è uno **scudo a spalle angolari** — sicurezza con la geometria di un nodo di rete, non l'araldica di un lucchetto — con dentro un segno di spunta che termina su un nodo pieno: la verifica che si chiude in un punto certo. Riassume ciò che il prodotto fa: un audit che difende, eseguito all'estremità della rete, che finisce in un rilievo verificato.
+
+**Il gradiente non parte da uno slate freddo, e la scelta è motivata.** L'accento di tutto il sistema è indaco-violetto; un logo che non condivide alcun colore con l'interfaccia crea due marchi nella stessa pagina, ed è la prima cosa che nota chi valuta un prodotto. Il gradiente parte quindi dall'accento esistente, attraversa il ciano — dove "cyber" vive davvero — e arriva allo smeraldo. Indaco → cielo → smeraldo interpola pulito in sRGB, mentre un violetto → verde diretto passerebbe dal grigio.
+
+- Le tinte sono variabili CSS (`--logo-from/via/to`) che cambiano con il tema: su fondo scuro servono versioni schiarite, non le stesse a opacità ridotta.
+- Gli id dei gradienti vengono da `useId`: due loghi nella stessa pagina con lo stesso id producono markup non valido e il browser risolve entrambi al primo `defs` — invisibile finché i gradienti coincidono, visibile il giorno in cui una variante cambia colore.
+- `LogoPrint` inverte il rapporto per la stampa: un gradiente in bianco e nero diventa una macchia grigia e la spunta bianca al suo interno sparisce.
+- [`app/icon.svg`](app/icon.svg) e [`app/opengraph-image.tsx`](app/opengraph-image.tsx) ripetono la geometria con colori scritti a mano: sono serviti fuori dal documento, dove `var(--logo-from)` non risolve nulla.
 
 ---
 
@@ -293,6 +308,15 @@ app/
   api/billing/checkout/   Avvio di Stripe Checkout
   api/webhooks/stripe/    Webhook firmato, fail-closed sul segreto
   api/health/deep/        Sonde reali su database, Redis e modello
+  api/billing/portal/     Portale clienti Stripe: metodo di pagamento, fatture, disdetta
+  api/team/invite/        Inviti al workspace, con limite di postazioni
+  api/invite/accept/      Accettazione dell'invito
+  api/auth/forgot/        Richiesta di reimpostazione password
+  api/auth/reset/         Consumo del token e nuova password
+  icon.svg                Favicon: stessa geometria del marchio, colori statici
+  opengraph-image.tsx     Anteprima social generata da codice
+  privacy/  terms/        Pagine legali
+  forgot-password/  reset-password/[token]/  invite/[token]/
   history/                Cronologia del workspace e dettaglio di un audit
   pricing/                Listino
   settings/               Profilo, piano, avvisi al team, diagnostica
@@ -319,6 +343,10 @@ components/
   metrics-panel.tsx       Latenza, token, costo, step
   extractor-workbench.tsx Drag-and-drop, tabella entità, esportazione JSON
 lib/
+  auth/tokens.ts          Token opachi per inviti e reset; in archivio solo il digest
+  auth/password-reset.ts  Reimpostazione: non rivela se un'email esista
+  auth/invitations.ts     Inviti e conteggio postazioni (computeSeatUsage è puro)
+  email/send.ts           Unico punto di uscita per le email, con ripiego dichiarato
   auth/password.ts        PBKDF2 via Web Crypto, formato versionato
   auth/session.ts         Cookie firmato HMAC, senza tabella di sessioni
   auth/repository.ts      Account e workspace, con isolamento per organizzazione
@@ -356,7 +384,7 @@ lib/
   vector.ts               Edge RAG: embedding, RRF, ricerca ibrida
   schemas.ts              Contratti Zod condivisi
   metrics.ts              Token, costo, latenza (puro)
-tests/                    508 test
+tests/                    534 test
 db/schema.sql             pgvector + full-text + indici
 scripts/ingest.ts         Popolamento del vector store
 ```

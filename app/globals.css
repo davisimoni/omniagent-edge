@@ -37,6 +37,17 @@
     --warning: oklch(0.555 0.15 75);
     --danger: oklch(0.55 0.2 25);
     --ring: oklch(0.53 0.22 285 / 0.45);
+
+    /*
+     * Gradiente del marchio: indaco (l'accento del sistema) → cielo → smeraldo.
+     * Parte dall'accento invece che da uno slate freddo perché un logo che non
+     * condivide alcun colore con l'interfaccia crea due marchi nella stessa
+     * pagina. Indaco → smeraldo diretto passerebbe dal grigio in sRGB; la tappa
+     * sul ciano lo evita ed è anche il punto in cui "cyber" vive davvero.
+     */
+    --logo-from: #4f46e5;
+    --logo-via: #0ea5e9;
+    --logo-to: #10b981;
   }
 
   .dark {
@@ -54,6 +65,12 @@
     --warning: oklch(0.78 0.14 80);
     --danger: oklch(0.68 0.18 22);
     --ring: oklch(0.7 0.17 290 / 0.5);
+
+    /* Su fondo scuro le stesse tinte a piena saturazione si spengono: qui
+       servono le versioni schiarite, non le stesse con l'opacità abbassata. */
+    --logo-from: #818cf8;
+    --logo-via: #38bdf8;
+    --logo-to: #34d399;
   }
 }
 

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { RiskHeatmap, RiskScoreDial } from '@/components/audit/risk-heatmap';
 import { SpecBadge } from '@/components/dev-mode/spec-badge';
+import { LogoPrint } from '@/components/ui/logo';
 import { Badge, type Tone } from '@/components/ui/primitives';
 import { buildExecutiveSummary } from '@/lib/audit/report';
 import {
@@ -93,8 +94,9 @@ export function AuditResult({
         parla e a quale data si riferisce.
       */}
       <header className="hidden border-b border-border pb-3 print:block">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-          Audit di conformità contrattuale · OmniAgent Edge
+        <LogoPrint size={20} />
+        <p className="mt-1 text-[11px] font-medium uppercase tracking-wide text-muted">
+          Audit di conformità contrattuale
         </p>
         <h1 className="mt-0.5 text-xl font-semibold tracking-tight">{audit.sourceName}</h1>
         <p className="mt-0.5 font-mono text-[10px] text-muted">

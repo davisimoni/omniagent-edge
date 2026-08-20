@@ -149,3 +149,20 @@ CREATE TABLE IF NOT EXISTS notification_settings (
   notify_from_band  TEXT   NOT NULL DEFAULT 'critical',
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Reimpostazione password ─────────────────────────────────────────────────
+-- Come per gli inviti, in archivio finisce solo il digest del token: un link di
+-- reimpostazione in chiaro nel database è un accesso a ogni account, leggibile
+-- da qualunque copia di quel database e da chiunque abbia accesso in lettura.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash  TEXT        NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- La ricerca avviene sempre per digest; l'indice su utente serve a invalidare
+-- in blocco i token precedenti quando se ne emette uno nuovo.
+CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id);
